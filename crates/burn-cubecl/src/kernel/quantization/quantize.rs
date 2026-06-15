@@ -29,11 +29,20 @@ where
         let nd = shape.num_dims();
         let k = shape[nd - 1];
         let m = shape.num_elements() / k;
+        // The codebook kernels are data-driven: the centroid table and the RHT
+        // sign pattern come in as runtime buffers chosen by `scheme.value`, so
+        // TQ4/TQ6/… all route through the same launch.
+        let codebook =
+            cubek::quantization::qa_matmul::upload_codebook::<R>(&output.client, scheme.value);
+        let rht_signs = cubek::quantization::qa_matmul::upload_rht_signs::<R>(&output.client);
         cubek::quantization::qa_matmul::launch_activation_quant::<R>(
             &output.client,
+            scheme.value,
             tensor.handle.clone(),
             out_values.handle.clone(),
             out_params.handle.clone(),
+            codebook,
+            rht_signs,
             m,
             k,
         );
