@@ -83,6 +83,14 @@ fn new_quantized<R: CubeRuntime>(
             shape_value[rank - 1] = shape_last.div_ceil(num_quants);
             size_of::<u32>()
         }
+        // TQ codebook dense pack: a unit is lcm(value_bits, 32) bits =
+        // `num_quants` codes in `size_bits_stored()/32` u32 words (Q6F: 16 codes
+        // / 3 words). Uses the scheme's own arithmetic, not a hand-derived guess.
+        QuantStore::PackedU32Dense(_) => {
+            let words_per_unit = scheme.size_bits_stored() / 32;
+            shape_value[rank - 1] = shape_last.div_ceil(num_quants) * words_per_unit;
+            size_of::<u32>()
+        }
         QuantStore::Native => match scheme.value {
             QuantValue::Q8F | QuantValue::Q8S | QuantValue::E4M3 | QuantValue::E5M2 => {
                 size_of::<i8>()
@@ -91,6 +99,7 @@ fn new_quantized<R: CubeRuntime>(
             | QuantValue::Q4S
             | QuantValue::Q2F
             | QuantValue::Q2S
+            | QuantValue::Q6F
             | QuantValue::E2M1 => {
                 panic!("Can't store native sub-byte values")
             }
@@ -170,6 +179,7 @@ impl<R: CubeRuntime> QTensorOps<Self> for CubeBackend<R> {
                         | QuantValue::Q2S
                         | QuantValue::E4M3
                         | QuantValue::E5M2
+                        | QuantValue::Q6F
                         | QuantValue::E2M1,
                     ..
                 } => {
@@ -177,6 +187,12 @@ impl<R: CubeRuntime> QTensorOps<Self> for CubeBackend<R> {
                     // packed into u32 and quantization parameters appended to the bytes
                     new_qtensor_optimized(data.bytes, data.shape.clone(), scheme, device)
                 }
+                // TQ codebook (Q6F/PackedU32Dense, mode Codebook): the packed
+                // bytes + appended params load identically — same construction.
+                QuantScheme {
+                    mode: QuantMode::Codebook,
+                    ..
+                } => new_qtensor_optimized(data.bytes, data.shape.clone(), scheme, device),
             },
             _ => panic!(
                 "Invalid dtype (expected DType::QFloat, got {:?})",

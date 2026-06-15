@@ -330,6 +330,25 @@ pub fn q_reshape<R: CubeRuntime>(mut tensor: CubeTensor<R>, shape: Shape) -> Cub
             shape[packed_d] = shape[packed_d].div_ceil(num_quants);
             shape
         }
+        // TQ codebook dense pack: inner dim in u32 words = div_ceil(codes,
+        // num_quants) * words_per_unit (consistent with quantized_handles).
+        QuantStore::PackedU32Dense(packed_dim) => {
+            let rank = shape.num_dims();
+            let mut shape = shape.clone();
+            let packed_d = rank - packed_dim - 1;
+            let num_quants = scheme.num_quants();
+
+            if !shape[packed_d].is_multiple_of(num_quants) {
+                unimplemented!(
+                    "Cannot reshape dense-packed tensor: inner dimension {} is not aligned with {num_quants}",
+                    shape[packed_d]
+                );
+            }
+
+            let words_per_unit = scheme.size_bits_stored() / 32;
+            shape[packed_d] = shape[packed_d].div_ceil(num_quants) * words_per_unit;
+            shape
+        }
     };
 
     let (values, scales) = tensor.quantized_handles().unwrap();

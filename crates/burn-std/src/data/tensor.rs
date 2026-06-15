@@ -329,11 +329,16 @@ impl TensorData {
                         level: QuantLevel::Tensor | QuantLevel::Block(_),
                         mode: QuantMode::Symmetric,
                         value:
-                            QuantValue::E4M3 | QuantValue::E5M2 | QuantValue::E2M1,
+                            QuantValue::E4M3 | QuantValue::E5M2 | QuantValue::E2M1 | QuantValue::Q6F,
                         ..
                     } => {
                         unimplemented!("Not yet implemented for iteration");
                     }
+                    // TQ codebook tensors (host value-iter) — not on the forward.
+                    QuantScheme {
+                        mode: QuantMode::Codebook,
+                        ..
+                    } => unimplemented!("codebook value-iter not on the QA forward path"),
                 },
             }
         }
@@ -729,11 +734,15 @@ impl core::fmt::Display for TensorData {
                         level: QuantLevel::Tensor | QuantLevel::Block(_),
                         mode: QuantMode::Symmetric,
                         value:
-                            QuantValue::E4M3 | QuantValue::E5M2 | QuantValue::E2M1,
+                            QuantValue::E4M3 | QuantValue::E5M2 | QuantValue::E2M1 | QuantValue::Q6F,
                         ..
                     } => {
                         unimplemented!("Can't format yet");
                     }
+                QuantScheme {
+                        mode: QuantMode::Codebook,
+                        ..
+                    } => unimplemented!("codebook display not on the QA forward path"),
             },
         };
         f.write_str(fmt.as_str())

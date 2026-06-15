@@ -61,12 +61,19 @@ impl DType {
                     QuantValue::E4M3 | QuantValue::E5M2 | QuantValue::E2M1 => {
                         core::mem::size_of::<u8>()
                     }
-                    QuantValue::Q4F | QuantValue::Q4S | QuantValue::Q2F | QuantValue::Q2S => {
-                        // Sub-byte values have fractional size
+                    QuantValue::Q4F
+                    | QuantValue::Q4S
+                    | QuantValue::Q2F
+                    | QuantValue::Q2S
+                    | QuantValue::Q6F => {
+                        // Sub-byte values have fractional size (Q6F is dense-packed,
+                        // never Native — present only for exhaustiveness)
                         0
                     }
                 },
-                QuantStore::PackedU32(_) => core::mem::size_of::<u32>(),
+                QuantStore::PackedU32(_) | QuantStore::PackedU32Dense(_) => {
+                    core::mem::size_of::<u32>()
+                }
                 QuantStore::PackedNative(_) => match scheme.value {
                     QuantValue::E2M1 => core::mem::size_of::<u8>(),
                     _ => 0,

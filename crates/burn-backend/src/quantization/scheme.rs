@@ -94,5 +94,11 @@ pub fn compute_q_params<B: Backend>(
                 scales: B::float_div_scalar(values_range, (b - a).into()),
             }
         }
+        // TQ codebook params are produced by the cubek activation-prep (RHT +
+        // Lloyd refine), not by symmetric min/max — this generic path is bypassed.
+        QuantScheme {
+            mode: QuantMode::Codebook,
+            ..
+        } => unimplemented!("codebook params come from the cubek activation-prep, not compute_q_params"),
     }
 }
