@@ -82,11 +82,14 @@ pub fn dtype_to_elem_type(dtype: DType) -> ElemType {
                 | QuantValue::Q4S
                 | QuantValue::Q2F
                 | QuantValue::Q2S
+                | QuantValue::Q6F
                 | QuantValue::E2M1 => {
                     panic!("Can't store native sub-byte values")
                 }
             },
-            QuantStore::PackedU32(_) => ElemType::UInt(UIntKind::U32),
+            QuantStore::PackedU32(_) | QuantStore::PackedU32Dense(_) => {
+                ElemType::UInt(UIntKind::U32)
+            }
             QuantStore::PackedNative(_) => match scheme.value {
                 QuantValue::E2M1 => panic!("Can't store native sub-byte values"),
                 other => panic!("{other:?} doesn't support native packing"),

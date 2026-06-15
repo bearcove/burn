@@ -64,6 +64,7 @@ impl<R: CubeRuntime> CubeTensor<R> {
                 | QuantValue::Q4S
                 | QuantValue::Q2F
                 | QuantValue::Q2S
+                | QuantValue::Q6F
                 | QuantValue::E2M1 => {
                     panic!("Can't store native sub-byte values")
                 }
@@ -72,6 +73,25 @@ impl<R: CubeRuntime> CubeTensor<R> {
                 let packed_dim = self.rank() - packed_dim - 1;
                 let mut shape = self.shape();
                 shape[packed_dim] = shape[packed_dim].div_ceil(scheme.num_quants());
+
+                CubeTensor {
+                    client: self.client.clone(),
+                    handle: self.handle.clone(),
+                    meta: Box::new(Metadata::new(shape, self.meta.strides.clone())),
+                    device: self.device.clone(),
+                    dtype: DType::U32,
+                    qparams: None,
+                }
+            }
+            // TQ codebook dense pack: the values handle the matmul reads — packed
+            // dim is in u32 words, div_ceil(codes, num_quants) * words_per_unit
+            // (Q6F: 16 codes per 3 words). Matches the allocation sizing arm.
+            QuantStore::PackedU32Dense(packed_dim) => {
+                let packed_dim = self.rank() - packed_dim - 1;
+                let words_per_unit = scheme.size_bits_stored() / 32;
+                let mut shape = self.shape();
+                shape[packed_dim] =
+                    shape[packed_dim].div_ceil(scheme.num_quants()) * words_per_unit;
 
                 CubeTensor {
                     client: self.client.clone(),

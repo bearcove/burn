@@ -249,7 +249,15 @@ impl QuantizedBytes {
                 QuantValue::E4M3 | QuantValue::E5M2 | QuantValue::E2M1 => {
                     unimplemented!("Not yet supported")
                 }
+                QuantValue::Q6F => {
+                    unreachable!("Q6F is dense-packed (PackedU32Dense), never PackedU32")
+                }
             },
+            // TQ codebook dense pack — value-equality/serialization split is not
+            // on the QA decode forward; make it faithful only if a path exercises it.
+            QuantStore::PackedU32Dense(_) => {
+                unimplemented!("Q6F dense value-split not needed for the QA forward path")
+            }
             QuantStore::PackedNative(_) => unimplemented!("Not yet supported"),
         };
 
