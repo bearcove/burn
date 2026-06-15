@@ -30,11 +30,10 @@ where
         let k = shape[nd - 1];
         let m = shape.num_elements() / k;
         // The codebook kernels are data-driven: the centroid table and the RHT
-        // sign pattern come in as runtime buffers chosen by `scheme.value`, so
+        // sign pattern are comptime-injected, chosen by `scheme.value`, so
         // TQ4/TQ6/… all route through the same launch.
-        let codebook =
-            cubek::quantization::qa_matmul::upload_codebook::<R>(&output.client, scheme.value);
-        let rht_signs = cubek::quantization::qa_matmul::upload_rht_signs::<R>(&output.client);
+        let codebook = super::tables::codebook_for(scheme.value);
+        let rht_signs = super::tables::rht_signs();
         cubek::quantization::qa_matmul::launch_activation_quant::<R>(
             &output.client,
             scheme.value,
@@ -53,6 +52,7 @@ where
             out_values.binding(),
             scale.binding(),
             out_params.binding(),
+            super::tables::codebook_for(scheme.value),
             scheme,
             dtype_to_elem_type(dtype),
         )
