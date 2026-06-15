@@ -94,11 +94,13 @@ pub fn compute_q_params<B: Backend>(
                 scales: B::float_div_scalar(values_range, (b - a).into()),
             }
         }
-        // TQ codebook params are produced by the cubek activation-prep (RHT +
-        // Lloyd refine), not by symmetric min/max — this generic path is bypassed.
+        // TQ codebook params are produced inside the cubek activation-quant kernel
+        // (RHT + Lloyd refine) and written to the QTensor's own scales buffer, so
+        // the params passed through here are ignored — hand back `min` as a valid,
+        // unused placeholder rather than computing a meaningless symmetric scale.
         QuantScheme {
             mode: QuantMode::Codebook,
             ..
-        } => unimplemented!("codebook params come from the cubek activation-prep, not compute_q_params"),
+        } => QuantizationParametersPrimitive { scales: min },
     }
 }
