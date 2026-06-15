@@ -26,6 +26,7 @@ where
         values.binding(),
         output.clone().binding(),
         params.binding(),
+        super::tables::codebook_for(scheme.value),
         &scheme,
         dtype_to_storage_type(dtype),
     )
