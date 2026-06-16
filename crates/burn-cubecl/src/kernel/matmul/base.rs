@@ -1,5 +1,9 @@
 use super::init_matmul_output;
-use crate::{CubeRuntime, kernel::quantization::dequantize, tensor::CubeTensor};
+use crate::{
+    CubeRuntime,
+    kernel::quantization::{dequantize, tables::codebook_for},
+    tensor::CubeTensor,
+};
 use burn_backend::cubecl::dtype_to_storage_type;
 use burn_backend::{DType, TensorMetadata};
 use burn_std::QuantLevel;
@@ -8,7 +12,6 @@ use cubek::{
         definition::{MatmulElems, MatmulGlobalElems, MatmulSetupError},
         strategy::Strategy,
     },
-    quantization::scheme::Codebook,
     std::InputBinding,
 };
 
@@ -112,10 +115,11 @@ pub(crate) fn launch_matmul<R: CubeRuntime>(
                     scheme,
                     dtype_to_storage_type(data_dtype),
                     dtype_to_storage_type(scale_dtype),
-                    // Burn's q_matmul dispatch carries no comptime codebook (the
-                    // symmetric/scale path); codebook matmul is driven directly
-                    // via helix-burn's qa_linear_cmma, not this Burn entry point.
-                    Codebook(&[]),
+                    // Thread the canonical centroid table for codebook values
+                    // (Q4F/Q6F → the Lloyd-Max table; empty for symmetric/scale
+                    // values), so a codebook-quantized matmul operand dequantizes
+                    // on read instead of crashing on an empty `Codebook(&[])`.
+                    codebook_for(scheme.value),
                 ),
             )
         }
@@ -152,7 +156,7 @@ pub(crate) fn launch_matmul<R: CubeRuntime>(
                         scheme,
                         dtype_to_storage_type(data_dtype),
                         dtype_to_storage_type(scale_dtype),
-                        Codebook(&[]),
+                        codebook_for(scheme.value),
                     ),
                 )
             }
