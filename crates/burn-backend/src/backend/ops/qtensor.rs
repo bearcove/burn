@@ -151,6 +151,20 @@ pub trait QTensorOps<B: Backend> {
     /// Convert the tensor back to a higher precision data type.
     fn dequantize(tensor: QuantizedTensor<B>, dtype: FloatDType) -> FloatTensor<B>;
 
+    /// Quantized linear: `activation @ weightᵀ`, where `weight` is a quantized
+    /// `[n, k]` tensor and `activation` is a float `[..., k]` tensor, producing a
+    /// float `[..., n]` tensor.
+    ///
+    /// This is the weight-quantized (W4A16-style) matmul: the weight is
+    /// dequantized **on read** inside the kernel, never materialized. The default
+    /// implementation dequantizes the whole weight and does a dense `A @ Wᵀ`;
+    /// codebook backends override it with a fused dequant-on-read kernel.
+    fn q_linear(activation: FloatTensor<B>, weight: QuantizedTensor<B>) -> FloatTensor<B> {
+        let w = Self::dequantize(weight, FloatDType::F32);
+        let wt = B::float_transpose(w);
+        B::float_matmul(activation, wt)
+    }
+
     /// Gets the device of the tensor.
     ///
     /// # Arguments

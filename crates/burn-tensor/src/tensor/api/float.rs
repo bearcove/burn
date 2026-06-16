@@ -388,6 +388,14 @@ $$\text{erf}\(x\) = \frac{2}{\sqrt{\pi}} \int_0^x e^{-t^2} dt$$
         Tensor::new(dequantize_impl(self.primitive))
     }
 
+    /// Quantized linear: `self @ weightᵀ`, where `self` is this float `[..., k]`
+    /// tensor and `weight` is a quantized `[n, k]` tensor, producing a float
+    /// `[..., n]` tensor. The weight is dequantized **on read** (codebook backends
+    /// fuse it; otherwise it falls back to a dense `A @ Wᵀ`).
+    pub fn q_linear(self, weight: Tensor<D>) -> Tensor<D> {
+        Tensor::new(q_linear_impl(self.primitive, weight.primitive))
+    }
+
     /// Checks element wise if the tensor is close to another tensor.
     ///
     /// The tolerance is defined by the following equation:
@@ -1168,6 +1176,12 @@ fn quantize_dynamic_impl(p: BridgeTensor, scheme: &QuantScheme) -> BridgeTensor 
 
 fn dequantize_impl(p: BridgeTensor) -> BridgeTensor {
     BridgeTensor::float(p.into_float())
+}
+
+fn q_linear_impl(activation: BridgeTensor, weight: BridgeTensor) -> BridgeTensor {
+    // `weight.into()` yields the raw quantized dispatch tensor (no dequant — that
+    // happens on read inside `Dispatch::q_linear`); `activation` is the float operand.
+    BridgeTensor::float(Dispatch::q_linear(activation.into_float(), weight.into()))
 }
 
 fn is_nan_impl(p: BridgeTensor) -> BridgeTensor {
