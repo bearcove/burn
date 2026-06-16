@@ -6,30 +6,43 @@ use burn_backend::{
 };
 use burn_std::{FloatDType, IntDType, QuantScheme, Shape};
 
-use crate::{Autodiff, checkpoint::strategy::CheckpointStrategy};
+use crate::{Autodiff, checkpoint::strategy::CheckpointStrategy, tensor::AutodiffTensor};
 
 impl<B: Backend, C: CheckpointStrategy> QTensorOps<Self> for Autodiff<B, C> {
-    fn q_from_data(_data: TensorData, _device: &Device<Self>) -> QuantizedTensor<Self> {
-        todo!()
+    fn q_from_data(data: TensorData, device: &Device<Self>) -> QuantizedTensor<Self> {
+        B::q_from_data(data, device)
     }
 
+    // QAT fake-quant support: the quantized tensor cannot carry an autodiff
+    // node (`QuantizedTensorPrimitive = B::QuantizedTensorPrimitive`), so
+    // `quantize`/`dequantize` are *value-only* — they run on the inner backend
+    // and `dequantize` returns a fresh untracked float. The straight-through
+    // gradient is the caller's responsibility, e.g.
+    // `x + (x.quantize_dynamic(s).dequantize() - x).detach()`, which is exactly
+    // how the fake-quant is used (round-trip value, identity gradient).
     fn quantize(
-        _tensor: FloatTensor<Self>,
-        _scheme: &QuantScheme,
-        _qparams: QuantizationParametersPrimitive<Self>,
+        tensor: FloatTensor<Self>,
+        scheme: &QuantScheme,
+        qparams: QuantizationParametersPrimitive<Self>,
     ) -> QuantizedTensor<Self> {
-        todo!() // required for QAT
+        B::quantize(
+            tensor.primitive,
+            scheme,
+            QuantizationParametersPrimitive {
+                scales: qparams.scales.primitive,
+            },
+        )
     }
 
     fn quantize_dynamic(
-        _tensor: FloatTensor<Self>,
-        _scheme: &QuantScheme,
+        tensor: FloatTensor<Self>,
+        scheme: &QuantScheme,
     ) -> QuantizedTensor<Self> {
-        todo!()
+        B::quantize_dynamic(tensor.primitive, scheme)
     }
 
-    fn dequantize(_tensor: QuantizedTensor<Self>, _dtype: FloatDType) -> FloatTensor<Self> {
-        todo!()
+    fn dequantize(tensor: QuantizedTensor<Self>, dtype: FloatDType) -> FloatTensor<Self> {
+        AutodiffTensor::new(B::dequantize(tensor, dtype))
     }
 
     fn q_device(tensor: &QuantizedTensor<Self>) -> Device<Self> {
