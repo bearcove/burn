@@ -6,7 +6,13 @@ use burn_backend::{
 };
 use burn_std::{FloatDType, IntDType, QuantScheme, Shape};
 
-use crate::{Autodiff, checkpoint::strategy::CheckpointStrategy, tensor::AutodiffTensor};
+use crate::{
+    Autodiff,
+    checkpoint::{base::Checkpointer, strategy::CheckpointStrategy},
+    grads::Gradients,
+    ops::{Backward, Ops, OpsKind, unary},
+    tensor::AutodiffTensor,
+};
 
 impl<B: Backend, C: CheckpointStrategy> QTensorOps<Self> for Autodiff<B, C> {
     fn q_from_data(data: TensorData, device: &Device<Self>) -> QuantizedTensor<Self> {
@@ -43,6 +49,49 @@ impl<B: Backend, C: CheckpointStrategy> QTensorOps<Self> for Autodiff<B, C> {
 
     fn dequantize(tensor: QuantizedTensor<Self>, dtype: FloatDType) -> FloatTensor<Self> {
         AutodiffTensor::new(B::dequantize(tensor, dtype))
+    }
+
+    // W4A16 dequant-on-read matmul, differentiable. The activation is the tracked
+    // input; the quantized weight is a FROZEN constant (it carries no autodiff
+    // node — `QuantizedTensorPrimitive = B::QuantizedTensorPrimitive`), so it's
+    // saved as backward state, not a parent. Forward is the inner fused kernel
+    // (`y = x @ Wᵀ`, no dense materialization); backward propagates only the
+    // activation gradient `grad_x = grad_y @ dequant(W)` (dequantized transiently
+    // for the backward matmul, then freed — so training doesn't hold a dense tower).
+    fn q_linear(activation: FloatTensor<Self>, weight: QuantizedTensor<Self>) -> FloatTensor<Self> {
+        #[derive(Debug)]
+        struct QLinear;
+
+        impl<B: Backend> Backward<B, 1> for QLinear {
+            type State = QuantizedTensor<B>;
+
+            fn backward(
+                self,
+                ops: Ops<Self::State, 1>,
+                grads: &mut Gradients,
+                _checkpointer: &mut Checkpointer,
+            ) {
+                let weight = ops.state;
+                unary::<B, _>(ops.parents, ops.node, grads, |grad| {
+                    // forward y = x @ Wᵀ with W = dequant(weight) of shape [out, in];
+                    // grad_x = grad_y @ W  ([m, out] @ [out, in] = [m, in]).
+                    let w = B::dequantize(weight, FloatDType::F32);
+                    B::float_matmul(grad, w)
+                });
+            }
+        }
+
+        match QLinear
+            .prepare::<C>([activation.node.clone()])
+            .compute_bound()
+            .stateful()
+        {
+            OpsKind::Tracked(prep) => prep.finish(
+                weight.clone(),
+                B::q_linear(activation.primitive, weight),
+            ),
+            OpsKind::UnTracked(prep) => prep.finish(B::q_linear(activation.primitive, weight)),
+        }
     }
 
     fn q_device(tensor: &QuantizedTensor<Self>) -> Device<Self> {
