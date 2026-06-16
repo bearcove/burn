@@ -1,5 +1,5 @@
 use crate::kernel::{
-    AddOp, BinaryOp, BinaryOpFamily, OrOp,
+    AddOp, AssignOp, BinaryOp, BinaryOpFamily, OrOp,
     utils::{address_type, shape_divmod},
 };
 use crate::{CubeRuntime, tensor::CubeTensor};
@@ -65,6 +65,7 @@ pub(crate) fn select_assign<R: CubeRuntime>(
     indices: CubeTensor<R>,
     value: CubeTensor<R>,
     is_bool: bool,
+    assign: bool,
 ) -> CubeTensor<R> {
     let tensor = match tensor.can_mut() && tensor.is_nonoverlapping() {
         true => tensor,
@@ -75,9 +76,12 @@ pub(crate) fn select_assign<R: CubeRuntime>(
     let cube_dim = CubeDim::new(&indices.client, working_units);
     let cube_count = calculate_cube_count_elemwise(&indices.client, working_units, cube_dim);
 
-    let launch = match is_bool {
-        true => select_assign_kernel::launch::<OrOp, R>,
-        false => select_assign_kernel::launch::<AddOp, R>,
+    // `assign` overwrites the indexed positions (AssignOp); otherwise the
+    // reduction is OrOp (bool) / AddOp (numeric).
+    let launch = match (is_bool, assign) {
+        (true, _) => select_assign_kernel::launch::<OrOp, R>,
+        (false, true) => select_assign_kernel::launch::<AssignOp, R>,
+        (false, false) => select_assign_kernel::launch::<AddOp, R>,
     };
 
     let (tensor_dtype, indices_dtype) = (tensor.dtype, indices.dtype);

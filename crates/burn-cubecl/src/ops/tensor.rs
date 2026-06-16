@@ -217,7 +217,16 @@ where
         indices: IntTensor<Self>,
         value: FloatTensor<Self>,
     ) -> FloatTensor<Self> {
-        kernel::select_assign(tensor, dim, indices, value, false)
+        kernel::select_assign(tensor, dim, indices, value, false, false)
+    }
+
+    fn float_select_assign(
+        tensor: FloatTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+        value: FloatTensor<Self>,
+    ) -> FloatTensor<Self> {
+        kernel::select_assign(tensor, dim, indices, value, false, true)
     }
 
     fn float_slice(tensor: FloatTensor<Self>, slices: &[Slice]) -> FloatTensor<Self> {

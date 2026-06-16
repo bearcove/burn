@@ -532,6 +532,18 @@ pub trait FloatTensorOps<B: Backend> {
         value: FloatTensor<B>,
     ) -> FloatTensor<B>;
 
+    /// Overwrite (`Assign`) the selected `dim` slices at `indices` with `value`.
+    /// Backends with a native scatter-assign override this (e.g. cubecl launches
+    /// `AssignOp`). Default unimplemented — wire it through wrappers as needed.
+    fn float_select_assign(
+        _tensor: FloatTensor<B>,
+        _dim: usize,
+        _indices: IntTensor<B>,
+        _value: FloatTensor<B>,
+    ) -> FloatTensor<B> {
+        unimplemented!("float_select_assign (Assign) not implemented for this backend")
+    }
+
     /// Select tensor elements corresponding to the given slices.
     ///
     /// # Arguments
