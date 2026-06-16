@@ -30,6 +30,16 @@ impl QTensorOps<Self> for Dispatch {
         unary_op!(tensor, quantized, |tensor| B::dequantize(tensor, dtype) => Float)
     }
 
+    fn q_linear(activation: FloatTensor<Self>, weight: QuantizedTensor<Self>) -> FloatTensor<Self> {
+        binary_op!(
+            (activation, float),
+            (weight, quantized),
+            |activation, weight| {
+                B::q_linear(activation, weight)
+            } => Float
+        )
+    }
+
     fn q_device(tensor: &QuantizedTensor<Self>) -> DispatchDevice {
         tensor.device()
     }

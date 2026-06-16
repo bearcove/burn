@@ -215,6 +215,10 @@ impl<R: CubeRuntime> QTensorOps<Self> for CubeBackend<R> {
         kernel::quantization::dequantize(tensor, dtype.into())
     }
 
+    fn q_linear(activation: FloatTensor<Self>, weight: QuantizedTensor<Self>) -> FloatTensor<Self> {
+        kernel::quantization::q_linear(activation, weight)
+    }
+
     fn q_device(tensor: &QuantizedTensor<Self>) -> Device<Self> {
         tensor.device.clone()
     }
