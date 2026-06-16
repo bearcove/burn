@@ -28,7 +28,14 @@ pub fn q_linear<R: CubeRuntime>(activation: CubeTensor<R>, weight: CubeTensor<R>
         "q_linear: weight inner dim must match activation inner dim"
     );
 
-    // `launch_panel` reads the activation as contiguous f32 `[m, k]`.
+    // `launch_panel` reads the activation as contiguous f32 `[m, k]`. The served
+    // scheme is W4A16, so the activation arrives f16 — cast it up (a fused f16 arm
+    // in the kernel is a perf follow-up).
+    let activation = if activation.dtype == DType::F32 {
+        activation
+    } else {
+        crate::kernel::cast::cast(activation, DType::F32)
+    };
     let activation = into_contiguous(activation);
     let output = empty_device_dtype(
         activation.client.clone(),
