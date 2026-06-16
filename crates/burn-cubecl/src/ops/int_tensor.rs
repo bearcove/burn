@@ -160,7 +160,7 @@ impl<R: CubeRuntime> IntTensorOps<Self> for CubeBackend<R> {
         indices: IntTensor<Self>,
         value: IntTensor<Self>,
     ) -> IntTensor<Self> {
-        kernel::select_assign(tensor, dim, indices, value, false)
+        kernel::select_assign(tensor, dim, indices, value, false, false)
     }
 
     fn int_equal(

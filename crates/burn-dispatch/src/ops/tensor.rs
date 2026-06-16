@@ -201,6 +201,18 @@ impl FloatTensorOps<Self> for Dispatch {
         )
     }
 
+    fn float_select_assign(
+        tensor: FloatTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+        value: FloatTensor<Self>,
+    ) -> FloatTensor<Self> {
+        multi_op!(
+            inputs[(tensor, float), (indices, int), (value, float)], => Float,
+            B::float_select_assign(tensor, dim, indices, value)
+        )
+    }
+
     fn float_slice(tensor: FloatTensor<Self>, slices: &[Slice]) -> FloatTensor<Self> {
         unary_float!(tensor, float, |tensor| B::float_slice(tensor, slices) => Float)
     }

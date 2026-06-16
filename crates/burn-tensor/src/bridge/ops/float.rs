@@ -153,6 +153,12 @@ impl BasicOps for Float {
                 indices.into(),
                 values.into_float(),
             )),
+            IndexingUpdateOp::Assign => BridgeTensor::float(Dispatch::float_select_assign(
+                tensor.into_float(),
+                dim,
+                indices.into(),
+                values.into_float(),
+            )),
             other => unimplemented!("Unsupported update op {other:?}"),
         }
     }

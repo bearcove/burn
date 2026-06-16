@@ -177,7 +177,7 @@ impl<R: CubeRuntime> BoolTensorOps<Self> for CubeBackend<R> {
         indices: IntTensor<Self>,
         value: BoolTensor<Self>,
     ) -> BoolTensor<Self> {
-        kernel::select_assign(tensor, dim, indices, value, true)
+        kernel::select_assign(tensor, dim, indices, value, true, false)
     }
 
     fn bool_flip(tensor: BoolTensor<Self>, axes: &[usize]) -> BoolTensor<Self> {

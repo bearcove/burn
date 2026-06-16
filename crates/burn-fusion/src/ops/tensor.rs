@@ -865,6 +865,51 @@ impl<B: FusionBackend> FloatTensorOps<Self> for Fusion<B> {
             .output()
     }
 
+    fn float_select_assign(
+        tensor: FloatTensor<Self>,
+        dim: usize,
+        indices: IntTensor<Self>,
+        value: FloatTensor<Self>,
+    ) -> FloatTensor<Self> {
+        #[derive(new, Debug)]
+        struct SelectAssignOverwriteOps<B: FusionBackend> {
+            desc: SelectAssignOpIr,
+            _b: PhantomData<B>,
+        }
+
+        impl<B: FusionBackend> Operation<B::FusionRuntime> for SelectAssignOverwriteOps<B> {
+            fn execute(&self, handles: &mut HandleContainer<B::Handle>) {
+                let tensor = handles.get_float_tensor::<B>(&self.desc.tensor);
+                let indices = handles.get_int_tensor::<B>(&self.desc.indices);
+                let value = handles.get_float_tensor::<B>(&self.desc.value);
+
+                let output = B::float_select_assign(tensor, self.desc.dim, indices, value);
+
+                handles.register_float_tensor::<B>(&self.desc.out.id, output);
+            }
+        }
+
+        let streams = StreamId::current();
+
+        let client = tensor.client.clone();
+        let desc = SelectAssignOpIr::create(
+            tensor.into_ir(),
+            dim,
+            indices.into_ir(),
+            value.into_ir(),
+            IndexingUpdateOp::Assign,
+            || client.create_empty_handle(),
+        );
+
+        client
+            .register(
+                streams,
+                OperationIr::BaseFloat(BaseOperationIr::SelectAssign(desc.clone())),
+                SelectAssignOverwriteOps::<B>::new(desc),
+            )
+            .output()
+    }
+
     fn float_slice(tensor: FloatTensor<Self>, slices: &[Slice]) -> FloatTensor<Self> {
         #[derive(new, Debug)]
         struct SliceOps<B: FusionBackend> {

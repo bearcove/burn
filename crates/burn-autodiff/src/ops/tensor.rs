@@ -1534,6 +1534,88 @@ impl<B: Backend, C: CheckpointStrategy> FloatTensorOps<Self> for Autodiff<B, C> 
         }
     }
 
+    fn float_select_assign(
+        tensor: FloatTensor<Self>,
+        dim: usize,
+        indices: IntTensor<B>,
+        value: FloatTensor<Self>,
+    ) -> FloatTensor<Self> {
+        #[derive(Debug)]
+        struct IndexSelectDimOverwrite;
+
+        #[derive(new, Debug)]
+        struct RetroSelectOverwrite<B: Backend> {
+            tensor_id: NodeId,
+            dim: usize,
+            indices: IntTensor<B>,
+            value_id: NodeId,
+        }
+
+        impl<B: Backend> RetroForward for RetroSelectOverwrite<B> {
+            fn forward(&self, states: &mut BackwardStates, out_node: NodeId) {
+                let tensor = states.get_state::<B::FloatTensorPrimitive>(&self.tensor_id);
+                let value = states.get_state::<B::FloatTensorPrimitive>(&self.value_id);
+                let out = B::float_select_assign(tensor, self.dim, self.indices.clone(), value);
+                states.save(out_node, out)
+            }
+        }
+
+        // Backward of `y = x; y[indices] = v`:
+        //   dL/dx = dL/dy with the indexed slices ZEROED (y[indices] ⊥ x),
+        //   dL/dv = select(dL/dy, indices)         (same as the add case).
+        impl<B: Backend> Backward<B, 2> for IndexSelectDimOverwrite {
+            type State = (usize, IntTensor<B>, Shape, B::Device);
+
+            fn backward(
+                self,
+                ops: Ops<Self::State, 2>,
+                grads: &mut Gradients,
+                _checkpointer: &mut Checkpointer,
+            ) {
+                let (dim, indices, vshape, device) = ops.state;
+                let indices2 = indices.clone();
+
+                binary::<B, _, _>(
+                    ops.parents,
+                    ops.node,
+                    grads,
+                    |grad| {
+                        let zeros = B::float_zeros(vshape, &device, grad.dtype().into());
+                        B::float_select_assign(grad, dim, indices, zeros)
+                    },
+                    |grad| B::float_select(grad, dim, indices2),
+                );
+            }
+        }
+
+        let vshape = value.primitive.shape();
+        let device = B::float_device(&value.primitive);
+
+        match IndexSelectDimOverwrite
+            .prepare::<C>([tensor.node.clone(), value.node.clone()])
+            .memory_bound()
+            .retro_forward(RetroSelectOverwrite::<B>::new(
+                tensor.node.id,
+                dim,
+                indices.clone(),
+                value.node.id,
+            ))
+            .parents([&tensor, &value])
+            .stateful()
+        {
+            OpsKind::Tracked(prep) => prep.finish(
+                (dim, indices.clone(), vshape, device),
+                B::float_select_assign(tensor.primitive, dim, indices, value.primitive),
+            ),
+            OpsKind::UnTracked(prep) => prep.finish(B::float_select_assign(
+                tensor.primitive,
+                dim,
+                indices,
+                value.primitive,
+            )),
+        }
+    }
+
     fn float_slice(tensor: FloatTensor<Self>, slices: &[Slice]) -> FloatTensor<Self> {
         #[derive(Debug)]
         struct Index;
