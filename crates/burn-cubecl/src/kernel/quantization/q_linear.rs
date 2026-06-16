@@ -45,6 +45,8 @@ pub fn q_linear<R: CubeRuntime>(activation: CubeTensor<R>, weight: CubeTensor<R>
         codes.handle.clone(),
         scales.handle.clone(),
         super::tables::codebook_for(scheme.value),
+        // Non-empty signs ⇒ fold bee's forward-RHT (prerot) into the matvec.
+        super::tables::rht_signs(),
         output.handle.clone(),
         m,
         n,
