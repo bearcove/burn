@@ -42,6 +42,11 @@ pub fn matmul_autotune<R: CubeRuntime>(
 
     let client = lhs.client.clone();
     let num_cpu_cores = client.properties().hardware.num_cpu_cores;
+    // TMA matmul kernels require sm_90+ (Hopper `Tma::Base`). On devices without
+    // TMA (Ampere, Apple/Metal, …) `features.tma` is empty; the cubek TMA strategy
+    // hard-faults the compute server at launch there ("matmul_specialized_tma_mma:
+    // unknown error" → channel down), so never offer it as an autotune candidate.
+    let tma_supported = !client.properties().features.tma.is_empty();
 
     static TUNER: LocalTuner<MatmulAutotuneKey, CubeTuneId> = local_tuner!();
 
@@ -80,7 +85,12 @@ pub fn matmul_autotune<R: CubeRuntime>(
             }
         });
 
-        let tma = TuneGroup::<MatmulAutotuneKey>::new("tma", |key| {
+        let tma = TuneGroup::<MatmulAutotuneKey>::new("tma", move |key| {
+            // Skip TMA entirely on devices that don't support it (else the kernel
+            // launch crashes the compute server — see `tma_supported` above).
+            if !tma_supported {
+                return PRIORITY_NEVER;
+            }
             // For large matmul, we set the max priority to TMA kernels, higher than any other
             // matmuls, since they are the best kernels no matter what.
             //
