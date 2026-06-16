@@ -31,7 +31,13 @@ impl QTensorOps<Self> for Dispatch {
     }
 
     fn q_linear(activation: FloatTensor<Self>, weight: QuantizedTensor<Self>) -> FloatTensor<Self> {
-        binary_op!(
+        // `binary_float!` (not `binary_op!`): the activation is a float that may be
+        // autodiff-tracked while the quantized weight is on the inner backend
+        // variant (quantized tensors can't carry an autodiff node). Its (float,
+        // any) arm promotes — routing `(Autodiff(act), Backend(weight))` to
+        // `Autodiff<Backend>::q_linear`, which has the backward — instead of the
+        // same-variant-only `binary_op!` that panics on the mismatch.
+        binary_float!(
             (activation, float),
             (weight, quantized),
             |activation, weight| {
