@@ -1,5 +1,5 @@
 use burn_backend::{
-    Backend, ExecutionError, TensorData,
+    Backend, ExecutionError, TensorData, TensorMetadata,
     ops::QTensorOps,
     quantization::QuantizationParametersPrimitive,
     tensor::{Device, FloatTensor, IntTensor, QuantizedTensor},
@@ -73,10 +73,15 @@ impl<B: Backend, C: CheckpointStrategy> QTensorOps<Self> for Autodiff<B, C> {
             ) {
                 let weight = ops.state;
                 unary::<B, _>(ops.parents, ops.node, grads, |grad| {
-                    // forward y = x @ Wᵀ with W = dequant(weight) of shape [out, in];
-                    // grad_x = grad_y @ W  ([m, out] @ [out, in] = [m, in]).
+                    // q_linear's forward applies bee's per-32-block forward-RHT (prerot)
+                    // to the activation — `R = (1/√32)·H·D_s` (sign, then Walsh-Hadamard)
+                    // — then matmuls the RHT-space weight: y = R(x) @ dequant(W_rot)ᵀ.
+                    // So grad_x = Rᵀ(grad_y @ dequant(W_rot)), with the adjoint
+                    // `Rᵀ = (1/√32)·D_s·H` (Hadamard, then sign). `dequantize` returns the
+                    // RHT-space (rotated) weight; the inverse-RHT lives here.
                     let w = B::dequantize(weight, FloatDType::F32);
-                    B::float_matmul(grad, w)
+                    let tmp = B::float_matmul(grad, w); // [m, in] in RHT (rotated) space
+                    inverse_rht::<B>(tmp)
                 });
             }
         }
@@ -136,4 +141,42 @@ impl<B: Backend, C: CheckpointStrategy> QTensorOps<Self> for Autodiff<B, C> {
     fn q_argmin(tensor: QuantizedTensor<Self>, dim: usize, out_dtype: IntDType) -> IntTensor<Self> {
         B::q_argmin(tensor, dim, out_dtype)
     }
+}
+
+/// Apply bee's inverse-RHT (the adjoint of q_linear's forward prerot) per 32-block
+/// along the inner dimension of `tmp` `[m, in]`: `Rᵀ = (1/√32)·D_s·H` — Walsh-
+/// Hadamard, then the ±1 sign pattern, then `1/√32`. Used by the `q_linear`
+/// backward so the activation gradient is consistent with the served forward.
+fn inverse_rht<B: Backend>(tmp: FloatTensor<B>) -> FloatTensor<B> {
+    use burn_std::Shape;
+    const INV_SQRT32: f32 = 0.176_776_69; // 1/√32
+    // bee's 32-wide ±1 RHT sign pattern (mirror of burn-cubecl's RHT_SIGNS_TABLE),
+    // pre-scaled by 1/√32 so a single elementwise mul applies `D_s` and the norm.
+    const SIGNS: [f32; 32] = [
+        1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0,
+        -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0, -1.0, 1.0,
+    ];
+
+    let device = B::float_device(&tmp);
+    let shape = tmp.shape();
+    let (m, k) = (shape[0], shape[1]);
+    let nblk = k / 32;
+
+    // Natural-order Walsh-Hadamard H[i,j] = (-1)^popcount(i&j) (matches cubek's
+    // radix-2 butterfly). Symmetric, so `WHT(v) = (v · H)` row-wise.
+    let mut h = alloc::vec![0.0f32; 32 * 32];
+    for i in 0..32usize {
+        for j in 0..32usize {
+            h[i * 32 + j] = if (i & j).count_ones() % 2 == 0 { 1.0 } else { -1.0 };
+        }
+    }
+    let signs_scaled: alloc::vec::Vec<f32> = SIGNS.iter().map(|&s| s * INV_SQRT32).collect();
+
+    let h32 = B::float_from_data(TensorData::new(h, Shape::new([32, 32])), &device);
+    let signs = B::float_from_data(TensorData::new(signs_scaled, Shape::new([1, 32])), &device);
+
+    let t = B::float_reshape(tmp, Shape::new([m * nblk, 32]));
+    let wht = B::float_matmul(t, h32); // (v · H) per row = WHT(v)
+    let signed = B::float_mul(wht, signs); // ⊙ (sign / √32)  — broadcast [N,32]·[1,32]
+    B::float_reshape(signed, Shape::new([m, k]))
 }
