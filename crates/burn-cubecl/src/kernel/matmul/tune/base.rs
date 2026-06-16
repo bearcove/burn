@@ -449,6 +449,15 @@ pub fn matmul_autotune<R: CubeRuntime>(
                 &accelerated,
             ),
         ] {
+            // Skip TMA strategies on devices without TMA (Ampere / Apple-Metal): in
+            // this loop `group_extra` is `Some(&tma)` iff the strategy is a TMA one,
+            // and they're ALSO in the `accelerated` tile group — so gating only the
+            // `tma` group priority doesn't exclude them. Launching a TMA kernel on a
+            // non-TMA device hard-faults the compute server, so drop them outright.
+            // (Kept on Hopper, where `tma_supported`.)
+            if !tma_supported && group_extra.is_some() {
+                continue;
+            }
             let priority_within_group = |key: &MatmulAutotuneKey, double_buf: bool| match double_buf
             {
                 false => PRIORITY_MAX,
