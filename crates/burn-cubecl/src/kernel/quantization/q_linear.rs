@@ -28,14 +28,9 @@ pub fn q_linear<R: CubeRuntime>(activation: CubeTensor<R>, weight: CubeTensor<R>
         "q_linear: weight inner dim must match activation inner dim"
     );
 
-    // `launch_panel` reads the activation as contiguous f32 `[m, k]`. The served
-    // scheme is W4A16, so the activation arrives f16 — cast it up (a fused f16 arm
-    // in the kernel is a perf follow-up).
-    let activation = if activation.dtype == DType::F32 {
-        activation
-    } else {
-        crate::kernel::cast::cast(activation, DType::F32)
-    };
+    // The kernel reads the activation in its NATIVE float type (f16 for A16, or
+    // f32), casting per-element — no separate f32 materialization, and the f16
+    // read halves the activation bandwidth (it's re-read once per output column).
     let activation = into_contiguous(activation);
     let output = empty_device_dtype(
         activation.client.clone(),
@@ -44,21 +39,33 @@ pub fn q_linear<R: CubeRuntime>(activation: CubeTensor<R>, weight: CubeTensor<R>
         DType::F32,
     );
     let (codes, scales) = weight.quantized_handles().unwrap();
+    let cb = super::tables::codebook_for(scheme.value);
+    // Non-empty signs ⇒ fold bee's forward-RHT (prerot) into the matvec.
+    let rht = super::tables::rht_signs();
 
-    cubek::quantization::qa_matmul::launch_panel::<R>(
-        &output.client,
-        scheme.value,
-        activation.handle.clone(),
-        codes.handle.clone(),
-        scales.handle.clone(),
-        super::tables::codebook_for(scheme.value),
-        // Non-empty signs ⇒ fold bee's forward-RHT (prerot) into the matvec.
-        super::tables::rht_signs(),
-        output.handle.clone(),
-        m,
-        n,
-        k,
-    );
+    macro_rules! launch {
+        ($f:ty) => {
+            cubek::quantization::qa_matmul::launch_panel::<R, $f>(
+                &output.client,
+                scheme.value,
+                activation.handle.clone(),
+                codes.handle.clone(),
+                scales.handle.clone(),
+                cb,
+                rht,
+                output.handle.clone(),
+                m,
+                n,
+                k,
+            )
+        };
+    }
+    match activation.dtype {
+        DType::F32 => launch!(f32),
+        DType::F16 => launch!(burn_backend::f16),
+        DType::BF16 => launch!(burn_backend::bf16),
+        other => panic!("q_linear: unsupported activation dtype {other:?}"),
+    }
 
     output
 }
