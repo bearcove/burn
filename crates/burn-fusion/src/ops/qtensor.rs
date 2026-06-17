@@ -59,6 +59,30 @@ impl<B: FusionBackend> QTensorOps<Self> for Fusion<B> {
             .output()
     }
 
+    unsafe fn q_from_external(
+        ptr: u64,
+        data_bytes: usize,
+        scales_bytes: usize,
+        shape: Shape,
+        scheme: QuantScheme,
+        device: &Device<Self>,
+    ) -> QuantizedTensor<Self> {
+        // Mirrors `q_from_data`, but the inner backend builds the tensor zero-copy
+        // over external memory instead of copying `TensorData`.
+        let client = get_client::<B>(device);
+        let dtype = burn_backend::DType::QFloat(scheme);
+        let tensor =
+            unsafe { B::q_from_external(ptr, data_bytes, scales_bytes, shape, scheme, device) };
+        let shape = burn_backend::TensorMetadata::shape(&tensor);
+
+        let handle = B::quantized_tensor_handle(tensor);
+        let desc = InitOperationIr::create(shape, dtype, || client.register_tensor_handle(handle));
+
+        client
+            .register(StreamId::current(), OperationIr::Init(desc), NoOp::<B>::new())
+            .output()
+    }
+
     fn quantize(
         tensor: FloatTensor<Self>,
         scheme: &QuantScheme,

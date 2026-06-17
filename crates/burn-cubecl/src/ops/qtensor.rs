@@ -309,6 +309,17 @@ impl<R: CubeRuntime> QTensorOps<Self> for CubeBackend<R> {
         }
     }
 
+    unsafe fn q_from_external(
+        ptr: u64,
+        data_bytes: usize,
+        scales_bytes: usize,
+        shape: Shape,
+        scheme: QuantScheme,
+        device: &Device<Self>,
+    ) -> QuantizedTensor<Self> {
+        unsafe { new_qtensor_external::<R>(ptr, data_bytes, scales_bytes, shape, scheme, device) }
+    }
+
     // TODO: quantize_dynamic (we can compute min-max on the fly and scale, especially when not per-tensor)
 
     fn quantize(

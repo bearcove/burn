@@ -133,6 +133,26 @@ pub trait QTensorOps<B: Backend> {
     /// The tensor with the given data.
     fn q_from_data(data: TensorData, device: &Device<B>) -> QuantizedTensor<B>;
 
+    /// Create a quantized tensor whose packed codes+scales are backed by EXTERNAL,
+    /// caller-owned memory (zero-copy — no `memcpy`), for mmap'd weights. `ptr` is the
+    /// address of the contiguous `[codes | scales]` span; `data_bytes`/`scales_bytes`
+    /// are their byte lengths. Only backends with foreign-buffer support (Metal 4)
+    /// override this.
+    ///
+    /// # Safety
+    /// `ptr` must be page-aligned, valid for `data_bytes + scales_bytes`, and the caller
+    /// MUST keep the backing mapping alive for as long as the tensor (and any GPU work).
+    unsafe fn q_from_external(
+        _ptr: u64,
+        _data_bytes: usize,
+        _scales_bytes: usize,
+        _shape: Shape,
+        _scheme: QuantScheme,
+        _device: &Device<B>,
+    ) -> QuantizedTensor<B> {
+        unimplemented!("q_from_external (zero-copy mmap weights) not supported by this backend")
+    }
+
     /// Convert the tensor to a lower precision data type based on the quantization scheme and parameters.
     fn quantize(
         tensor: FloatTensor<B>,
