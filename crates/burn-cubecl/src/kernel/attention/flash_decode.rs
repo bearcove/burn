@@ -43,7 +43,9 @@ fn flash_decode_kernel<F: Float>(
     let groups = comptime!(n_heads / n_kv);
     let kv = h / groups;
     let lane = UNIT_POS_X as usize; // 0..plane
-    let per_lane = comptime!(head_dim / plane); // channels this lane owns
+    // Channels per lane, rounded up so `head_dim` need not be a multiple of `plane`
+    // (and `head_dim < plane` works too); out-of-range channels are guarded below.
+    let per_lane = comptime!(head_dim.div_ceil(plane));
 
     let q_off = i * n_heads * head_dim + h * head_dim;
     let scale_f = F::cast_from(scale);
@@ -64,9 +66,11 @@ fn flash_decode_kernel<F: Float>(
         #[unroll]
         for t in 0..per_lane {
             let d = lane + t * plane;
-            partial += q[q_off + d] * k[k_off + d];
+            if d < head_dim {
+                partial += q[q_off + d] * k[k_off + d];
+            }
         }
-        let dot = plane_sum(partial); // full q·k across the warp
+        let dot = plane_sum(partial); // full q·k across the warp (idle lanes add 0)
         let s = dot * scale_f + masked;
 
         let m_new = if s > m { s } else { m };
@@ -77,7 +81,9 @@ fn flash_decode_kernel<F: Float>(
         #[unroll]
         for t in 0..per_lane {
             let d = lane + t * plane;
-            acc[t] = acc[t] * alpha + p * v[v_off + d];
+            if d < head_dim {
+                acc[t] = acc[t] * alpha + p * v[v_off + d];
+            }
         }
         m = m_new;
     }
@@ -87,7 +93,9 @@ fn flash_decode_kernel<F: Float>(
     #[unroll]
     for t in 0..per_lane {
         let d = lane + t * plane;
-        out[out_off + d] = acc[t] * inv_l;
+        if d < head_dim {
+            out[out_off + d] = acc[t] * inv_l;
+        }
     }
 }
 
