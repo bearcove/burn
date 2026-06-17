@@ -34,6 +34,10 @@ pub enum DispatchDevice {
     #[cfg(feature = "metal")]
     Metal(WgpuDevice),
 
+    /// The [native Metal 4 backend](Metal4) device (via cubecl-metal4).
+    #[cfg(feature = "metal4")]
+    Metal4(Metal4Device),
+
     /// The [ROCm backend](Rocm) device.
     #[cfg(feature = "rocm")]
     Rocm(RocmDevice),
@@ -148,6 +152,8 @@ impl core::fmt::Debug for DispatchDevice {
             Self::Cuda(device) => f.debug_tuple("Cuda").field(device).finish(),
             #[cfg(feature = "metal")]
             Self::Metal(device) => f.debug_tuple("Metal").field(device).finish(),
+            #[cfg(feature = "metal4")]
+            Self::Metal4(device) => f.debug_tuple("Metal4").field(device).finish(),
             #[cfg(feature = "rocm")]
             Self::Rocm(device) => f.debug_tuple("Rocm").field(device).finish(),
             #[cfg(feature = "vulkan")]
@@ -196,6 +202,13 @@ impl Default for DispatchDevice {
                         return Self::Metal(burn_wgpu::WgpuDevice::default());
                         panic!(
                             "BURN_DEVICE=metal requested, but the 'metal' feature is not enabled."
+                        );
+                    }
+                    "metal4" => {
+                        #[cfg(feature = "metal4")]
+                        return Self::Metal4(Metal4Device::default());
+                        panic!(
+                            "BURN_DEVICE=metal4 requested, but the 'metal4' feature is not enabled."
                         );
                     }
                     "rocm" => {
@@ -268,6 +281,12 @@ impl Default for DispatchDevice {
         #[cfg(feature = "metal")]
         return Self::Metal(burn_wgpu::WgpuDevice::default());
 
+        // Metal4 is opt-in (explicit `Device::metal4()` / `BURN_DEVICE=metal4`);
+        // it sits below `metal` in the default chain so enabling both keeps the
+        // shipped wgpu-Metal default unless explicitly overridden.
+        #[cfg(feature = "metal4")]
+        return Self::Metal4(Metal4Device::default());
+
         #[cfg(feature = "rocm")]
         return Self::Rocm(RocmDevice::default());
 
@@ -320,6 +339,8 @@ impl PartialEq for DispatchDevice {
             (Self::Cuda(a), Self::Cuda(b)) => a == b,
             #[cfg(feature = "metal")]
             (Self::Metal(a), Self::Metal(b)) => a == b,
+            #[cfg(feature = "metal4")]
+            (Self::Metal4(a), Self::Metal4(b)) => a == b,
             #[cfg(feature = "rocm")]
             (Self::Rocm(a), Self::Rocm(b)) => a == b,
             #[cfg(feature = "vulkan")]
@@ -380,6 +401,8 @@ impl DispatchDevice {
             Self::Cuda(_) => DispatchDeviceId::Cuda,
             #[cfg(feature = "metal")]
             Self::Metal(_) => DispatchDeviceId::Metal,
+            #[cfg(feature = "metal4")]
+            Self::Metal4(_) => DispatchDeviceId::Metal4,
             #[cfg(feature = "rocm")]
             Self::Rocm(_) => DispatchDeviceId::Rocm,
             #[cfg(feature = "vulkan")]
@@ -436,6 +459,7 @@ pub enum DispatchDeviceId {
     Vulkan = 8,
     WebGpu = 9,
     Remote = 10,
+    Metal4 = 11,
 }
 
 impl From<DispatchDeviceId> for u16 {
@@ -471,6 +495,8 @@ impl TryFrom<u16> for DispatchDeviceId {
             9 => Ok(Self::WebGpu),
             #[cfg(feature = "remote")]
             10 => Ok(Self::Remote),
+            #[cfg(feature = "metal4")]
+            11 => Ok(Self::Metal4),
             _ => Err(()),
         }
     }
@@ -485,6 +511,8 @@ impl DeviceOps for DispatchDevice {
             Self::Cuda(device) => device.defaults(),
             #[cfg(feature = "metal")]
             Self::Metal(device) => device.defaults(),
+            #[cfg(feature = "metal4")]
+            Self::Metal4(device) => device.defaults(),
             #[cfg(feature = "rocm")]
             Self::Rocm(device) => device.defaults(),
             #[cfg(feature = "vulkan")]
@@ -519,6 +547,8 @@ impl burn_backend::Device for DispatchDevice {
             DispatchDeviceId::Cuda => Self::Cuda(CudaDevice::from_id(device_id)),
             #[cfg(feature = "metal")]
             DispatchDeviceId::Metal => Self::Metal(WgpuDevice::from_id(device_id)),
+            #[cfg(feature = "metal4")]
+            DispatchDeviceId::Metal4 => Self::Metal4(Metal4Device::from_id(device_id)),
             #[cfg(feature = "rocm")]
             DispatchDeviceId::Rocm => Self::Rocm(RocmDevice::from_id(device_id)),
             #[cfg(feature = "vulkan")]
@@ -547,6 +577,8 @@ impl burn_backend::Device for DispatchDevice {
             Self::Cuda(device) => device.to_id(),
             #[cfg(feature = "metal")]
             Self::Metal(device) => device.to_id(),
+            #[cfg(feature = "metal4")]
+            Self::Metal4(device) => device.to_id(),
             #[cfg(feature = "rocm")]
             Self::Rocm(device) => device.to_id(),
             #[cfg(feature = "vulkan")]
@@ -582,6 +614,13 @@ impl From<CpuDevice> for DispatchDevice {
 impl From<CudaDevice> for DispatchDevice {
     fn from(device: CudaDevice) -> Self {
         DispatchDevice::Cuda(device)
+    }
+}
+
+#[cfg(feature = "metal4")]
+impl From<Metal4Device> for DispatchDevice {
+    fn from(device: Metal4Device) -> Self {
+        DispatchDevice::Metal4(device)
     }
 }
 
