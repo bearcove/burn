@@ -403,11 +403,16 @@ fn vector_sizes_quants<R: Runtime>(
                     }
                 }
             }
-            QuantValue::Q4F | QuantValue::Q4S | QuantValue::Q2F | QuantValue::Q2S => {
+            QuantValue::Q4F
+            | QuantValue::Q4S
+            | QuantValue::Q2F
+            | QuantValue::Q2S
+            | QuantValue::Q6F => {
                 unreachable!("Can't store native sub-byte values")
             }
         },
-        QuantStore::PackedU32(_) => {
+        // PackedU32 and PackedU32Dense both pack codes into u32 words → same sizing.
+        QuantStore::PackedU32(_) | QuantStore::PackedU32Dense(_) => {
             let mut vector_sizes = client
                 .io_optimized_vector_sizes(size_of::<u32>())
                 .collect::<Vec<_>>();

@@ -934,11 +934,14 @@ impl From<DType> for FuseType {
                     | QuantValue::Q4S
                     | QuantValue::Q2F
                     | QuantValue::Q2S
+                    | QuantValue::Q6F
                     | QuantValue::E2M1 => {
                         panic!("Can't store native sub-byte values")
                     }
                 },
                 QuantStore::PackedU32(_) => Self::U32,
+                // TQ4-dense / TQ6 codes packed densely into u32 words.
+                QuantStore::PackedU32Dense(_) => Self::U32,
                 QuantStore::PackedNative(_) => match scheme.value {
                     QuantValue::E2M1 => unimplemented!("Unsupported precision for fusion"),
                     other => panic!("{other:?} doesn't support native packing"),
