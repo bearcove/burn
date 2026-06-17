@@ -413,8 +413,35 @@ impl<R: CubeRuntime> QTensorOps<Self> for CubeBackend<R> {
             TensorPrimitive::QFloat(rhs) => (out_dtype, rhs),
         };
 
-        let out =
-            kernel::matmul::matmul(lhs, rhs, None, MatmulStrategy::default(), out_dtype).unwrap();
+        let strategy = MatmulStrategy::default();
+        let out = match kernel::matmul::matmul(
+            lhs.clone(),
+            rhs.clone(),
+            None,
+            strategy,
+            out_dtype,
+        ) {
+            Ok(out) => out,
+            Err(_) => {
+                // The chosen strategy (e.g. `Cube`, which has no packed-quant matmul)
+                // can't run on the packed operands directly — dequantize and retry,
+                // mirroring `launch_matmul_naive`'s fallback. Keeps the non-autotune
+                // (iOS / forced-Cube) path from panicking on a `Tensor::matmul` over a
+                // quantized tensor.
+                let lhs = if lhs.qparams.is_some() {
+                    kernel::quantization::dequantize(lhs, out_dtype)
+                } else {
+                    lhs
+                };
+                let rhs = if rhs.qparams.is_some() {
+                    kernel::quantization::dequantize(rhs, out_dtype)
+                } else {
+                    rhs
+                };
+                kernel::matmul::matmul(lhs, rhs, None, strategy, out_dtype)
+                    .expect("q_matmul: dequantized fallback also failed")
+            }
+        };
 
         match settings.quantization.propagation {
             QuantPropagation::Propagate => {
