@@ -806,10 +806,13 @@ fn dequantize<C: Float, N: Size>(
     #[comptime] scheme: QuantScheme,
     #[comptime] config: &FuseBlockConfig,
 ) {
-    comptime!(assert_eq!(
-        scheme.mode,
-        QuantMode::Symmetric,
-        "Only symmetric quantization mode is supported."
+    // Symmetric AND Codebook are both supported: the codebook centroids are
+    // threaded in below and `dequantize_symmetric_packed_value_at` dispatches on
+    // `scheme.mode` (→ `unpack_codebook` for Codebook). The old Symmetric-only
+    // assert predated codebook support and wrongly blocked fused codebook dequant.
+    comptime!(assert!(
+        matches!(scheme.mode, QuantMode::Symmetric | QuantMode::Codebook),
+        "fused dequant supports Symmetric and Codebook modes only"
     ));
 
     let quant_ty = comptime![match scheme.store {
