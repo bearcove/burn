@@ -61,7 +61,7 @@ impl<B: FusionBackend> QTensorOps<Self> for Fusion<B> {
             .register(
                 streams,
                 OperationIr::Custom(desc.clone()),
-                QLinearOps::<B>::new(desc, PhantomData),
+                QLinearOps::<B>::new(desc),
             )
             .output()
     }
