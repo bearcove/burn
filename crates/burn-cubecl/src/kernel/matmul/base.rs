@@ -38,6 +38,14 @@ impl Default for MatmulStrategy {
         #[cfg(target_os = "ios")]
         return MatmulStrategy::Cube;
 
+        // Capture aid: force the iOS heuristic Cube path on desktop so a dump run
+        // (METAL4_DUMP_MSL) produces the EXACT kernel set the iPhone will use — MSL
+        // codegen is target-independent, only matmul *selection* differs by target.
+        #[cfg(not(target_os = "ios"))]
+        if std::env::var("CUBECL_FORCE_CUBE_MATMUL").is_ok() {
+            return MatmulStrategy::Cube;
+        }
+
         // if autotune is enabled, default to autotune
         #[cfg(all(feature = "autotune", not(target_os = "ios")))]
         return MatmulStrategy::Autotune;
