@@ -206,6 +206,10 @@ pub enum DispatchTensorKind {
     #[cfg(feature = "metal")]
     Metal(BackendTensor<Metal>),
 
+    /// The [native Metal 4 backend](Metal4) tensor.
+    #[cfg(feature = "metal4")]
+    Metal4(BackendTensor<Metal4>),
+
     /// The [ROCm backend](Rocm) tensor.
     #[cfg(feature = "rocm")]
     Rocm(BackendTensor<Rocm>),
@@ -252,6 +256,8 @@ impl TensorMetadata for DispatchTensorKind {
             Self::Cuda(tensor) => tensor.dtype(),
             #[cfg(feature = "metal")]
             Self::Metal(tensor) => tensor.dtype(),
+            #[cfg(feature = "metal4")]
+            Self::Metal4(tensor) => tensor.dtype(),
             #[cfg(feature = "rocm")]
             Self::Rocm(tensor) => tensor.dtype(),
             #[cfg(feature = "vulkan")]
@@ -281,6 +287,8 @@ impl TensorMetadata for DispatchTensorKind {
             Self::Cuda(tensor) => tensor.shape(),
             #[cfg(feature = "metal")]
             Self::Metal(tensor) => tensor.shape(),
+            #[cfg(feature = "metal4")]
+            Self::Metal4(tensor) => tensor.shape(),
             #[cfg(feature = "rocm")]
             Self::Rocm(tensor) => tensor.shape(),
             #[cfg(feature = "vulkan")]
@@ -323,6 +331,8 @@ impl DispatchTensorKind {
             DispatchTensorKind::Cuda(_) => "Cuda",
             #[cfg(feature = "metal")]
             DispatchTensorKind::Metal(_) => "Metal",
+            #[cfg(feature = "metal4")]
+            DispatchTensorKind::Metal4(_) => "Metal4",
             #[cfg(feature = "rocm")]
             DispatchTensorKind::Rocm(_) => "Rocm",
             #[cfg(feature = "vulkan")]
@@ -466,6 +476,7 @@ impl_dispatch_conversion!(Cuda, feature = "cuda");
 impl_dispatch_conversion!(Rocm, feature = "rocm");
 impl_dispatch_conversion!(Remote, feature = "remote");
 impl_dispatch_conversion!(Metal, feature = "metal");
+impl_dispatch_conversion!(Metal4, feature = "metal4");
 impl_dispatch_conversion!(Vulkan, feature = "vulkan");
 impl_dispatch_conversion!(Wgpu, feature = "wgpu");
 impl_dispatch_conversion!(WebGpu, feature = "webgpu");
