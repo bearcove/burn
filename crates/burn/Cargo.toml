@@ -130,6 +130,7 @@ tch = ["burn-tch", "burn-core/tch"]
 vulkan = ["wgpu", "burn-core/vulkan"]
 webgpu = ["wgpu", "burn-core/webgpu"]
 metal = ["wgpu", "burn-core/metal"]
+metal4 = ["burn-metal4", "burn-core/metal4", "burn-vision?/cubecl-backend"]
 wgpu = ["burn-wgpu", "burn-core/wgpu", "burn-vision?/cubecl-backend"]
 cpu = ["burn-cpu", "burn-core/cpu", "burn-vision?/cubecl-backend"]
 
@@ -153,6 +154,7 @@ burn-std = { workspace = true }
 # TODO: clean up from root; backends should be exposed from the extension
 burn-candle = { workspace = true, optional = true, features = ["default"] }
 burn-cuda = { workspace = true, optional = true }
+burn-metal4 = { workspace = true, optional = true }
 burn-cpu = { workspace = true, optional = true }
 burn-rocm = { workspace = true, optional = true }
 burn-flex = { workspace = true, optional = true }
