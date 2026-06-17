@@ -145,6 +145,7 @@ enum TensorKind {
     Float,
     Int,
     Bool,
+    Quantized,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -198,6 +199,7 @@ impl TensorKind {
                     "FloatTensorPrimitive" => Some(Self::Float),
                     "IntTensorPrimitive" => Some(Self::Int),
                     "BoolTensorPrimitive" => Some(Self::Bool),
+                    "QuantizedTensorPrimitive" => Some(Self::Quantized),
                     _ => None,
                 }
             }
@@ -215,11 +217,13 @@ impl TensorKind {
                     "FloatTensor" => Some(Self::Float),
                     "IntTensor" => Some(Self::Int),
                     "BoolTensor" => Some(Self::Bool),
+                    "QuantizedTensor" => Some(Self::Quantized),
 
                     // Associated primitive types
                     "FloatTensorPrimitive" => Some(Self::Float),
                     "IntTensorPrimitive" => Some(Self::Int),
                     "BoolTensorPrimitive" => Some(Self::Bool),
+                    "QuantizedTensorPrimitive" => Some(Self::Quantized),
 
                     _ => None,
                 }
@@ -241,6 +245,7 @@ impl TensorKind {
             Self::Float => quote! { burn::backend::tensor::FloatTensor<Self> },
             Self::Int => quote! { burn::backend::tensor::IntTensor<Self> },
             Self::Bool => quote! { burn::backend::tensor::BoolTensor<Self> },
+            Self::Quantized => quote! { burn::backend::tensor::QuantizedTensor<Self> },
         }
     }
 
@@ -249,6 +254,7 @@ impl TensorKind {
             Self::Float => format_ident!("Float"),
             Self::Int => format_ident!("Int"),
             Self::Bool => format_ident!("Bool"),
+            Self::Quantized => format_ident!("Quantized"),
         }
     }
 
