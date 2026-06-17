@@ -125,7 +125,26 @@ impl<H: Clone> HandleContainer<H> {
     where
         B: BackendIr<Handle = H>,
     {
-        B::float_tensor(self.get_tensor_handle(tensor))
+        let prim = B::float_tensor(self.get_tensor_handle(tensor));
+        // TEMP PROBE (remove): the distill_kv autodiff+fusion corruption surfaces as a
+        // matmul reading a primitive whose ACTUAL shape != its registered IR shape (a
+        // freed handle's memory reused). Catch the FIRST such mismatch with a backtrace.
+        {
+            use core::sync::atomic::{AtomicUsize, Ordering};
+            static N: AtomicUsize = AtomicUsize::new(0);
+            let actual = burn_backend::TensorMetadata::shape(&prim);
+            if actual != tensor.shape && N.fetch_add(1, Ordering::Relaxed) < 4 {
+                eprintln!(
+                    "[SHAPE-PROBE] tensor {:?} status={:?} IR-shape={:?} ACTUAL-shape={:?}\n{}",
+                    tensor.id,
+                    tensor.status,
+                    tensor.shape,
+                    actual,
+                    std::backtrace::Backtrace::force_capture()
+                );
+            }
+        }
+        prim
     }
 
     /// Get the [int tensor](burn_backend::backend::BackendTypes::IntTensorPrimitive) corresponding to the
