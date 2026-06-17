@@ -29,7 +29,11 @@ cubecl-cuda = ["cubecl", "cubecl/cuda"]
 cubecl-hip = ["cubecl", "cubecl/hip"]
 cubecl-wgpu = ["cubecl", "cubecl/wgpu"]
 cubecl-metal = ["cubecl", "cubecl/metal"]
-cubecl-metal4 = ["cubecl", "cubecl/metal4"]
+# NOTE: deliberately does NOT enable `cubecl/metal4` here — that would force
+# resolution to a cubecl rev that has the feature and break the workspace on
+# older pins. The consumer (helix-burn) enables `cubecl/metal4` on its own
+# cubecl dep; this feature just gates the DeviceOps impl below.
+cubecl-metal4 = ["cubecl"]
 cubecl-vulkan = ["cubecl", "cubecl/vulkan"]
 cubecl-webgpu = ["cubecl", "cubecl/webgpu"]
 cubecl-cpu = ["cubecl", "cubecl/cpu"]
