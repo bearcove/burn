@@ -12,6 +12,19 @@ impl QTensorOps<Self> for Dispatch {
         creation_op!(Quantized, device, |device| B::q_from_data(data, device))
     }
 
+    unsafe fn q_from_external(
+        ptr: u64,
+        data_bytes: usize,
+        scales_bytes: usize,
+        shape: Shape,
+        scheme: QuantScheme,
+        device: &DispatchDevice,
+    ) -> QuantizedTensor<Self> {
+        creation_op!(Quantized, device, |device| unsafe {
+            B::q_from_external(ptr, data_bytes, scales_bytes, shape, scheme, device)
+        })
+    }
+
     fn quantize(
         tensor: FloatTensor<Self>,
         scheme: &QuantScheme,
