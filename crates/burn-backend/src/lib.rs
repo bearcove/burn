@@ -107,6 +107,25 @@ mod cube_cuda {
     }
 }
 
+#[cfg(feature = "cubecl-metal4")]
+mod cube_metal4 {
+    use crate::backend::DeviceOps;
+    use burn_std::{BoolStore, DType, DeviceSettings};
+    use cubecl::metal4::Metal4Device;
+
+    impl DeviceOps for Metal4Device {
+        fn defaults(&self) -> DeviceSettings {
+            // Apple GPUs: f16 cmma, bytewise bool (matches the wgpu-metal path).
+            DeviceSettings::new(
+                DType::F32,
+                DType::I32,
+                DType::Bool(BoolStore::U8),
+                Default::default(),
+            )
+        }
+    }
+}
+
 #[cfg(feature = "cubecl-cpu")]
 mod cube_cpu {
     use crate::backend::DeviceOps;
