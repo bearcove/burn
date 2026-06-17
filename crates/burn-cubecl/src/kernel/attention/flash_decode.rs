@@ -23,10 +23,10 @@ fn flash_decode_kernel<F: Float>(
     out: &mut Tensor<F>,
     n_q: usize,
     n_k: usize,
+    scale: f32,
     #[comptime] n_heads: usize,
     #[comptime] n_kv: usize,
     #[comptime] head_dim: usize,
-    #[comptime] scale: f32,
 ) {
     // One unit per (query_row, head).
     let pos = ABSOLUTE_POS as usize;
@@ -97,16 +97,18 @@ pub fn flash_decode_attention<R: CubeRuntime>(
     let v = crate::kernel::into_contiguous(v);
     let mask = crate::kernel::into_contiguous(mask);
 
+    let client = q.client.clone();
+    let dtype = q.dtype;
     let qs = q.shape();
     let ks = k.shape();
     let (n_q, n_heads, head_dim) = (qs[0], qs[1], qs[2]);
     let (n_k, n_kv) = (ks[0], ks[1]);
 
     let out = empty_device_dtype(
-        q.client.clone(),
+        client.clone(),
         q.device.clone(),
         Shape::new([n_q, n_heads, head_dim]),
-        q.dtype,
+        dtype,
     );
 
     let total = (n_q * n_heads) as u32;
@@ -117,24 +119,24 @@ pub fn flash_decode_attention<R: CubeRuntime>(
     macro_rules! launch {
         ($f:ty) => {
             flash_decode_kernel::launch::<$f, R>(
-                &q.client,
+                &client,
                 cube_count,
                 cube_dim,
-                q.as_tensor_arg(1),
-                k.as_tensor_arg(1),
-                v.as_tensor_arg(1),
-                mask.as_tensor_arg(1),
-                out.as_tensor_arg(1),
-                ScalarArg::new(n_q),
-                ScalarArg::new(n_k),
+                q.into_tensor_arg(),
+                k.into_tensor_arg(),
+                v.into_tensor_arg(),
+                mask.into_tensor_arg(),
+                out.clone().into_tensor_arg(),
+                n_q,
+                n_k,
+                scale,
                 n_heads,
                 n_kv,
                 head_dim,
-                scale,
             )
         };
     }
-    match q.dtype {
+    match dtype {
         DType::F32 => launch!(f32),
         DType::F16 => launch!(burn_backend::f16),
         other => panic!("flash_decode_attention: unsupported dtype {other:?}"),
