@@ -3,7 +3,7 @@
 //! `Metal4Runtime` (no wgpu). Apple-only; an empty crate elsewhere so the
 //! workspace still builds on Linux/CUDA boxes.
 
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 mod apple {
     use burn_cubecl::CubeBackend;
 
@@ -18,5 +18,5 @@ mod apple {
     pub type Metal4 = burn_fusion::Fusion<CubeBackend<Metal4Runtime>>;
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 pub use apple::*;
