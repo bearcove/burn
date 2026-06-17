@@ -539,7 +539,7 @@ pub fn matmul_autotune<R: CubeRuntime>(
 fn create_key<R: CubeRuntime>(
     (lhs, rhs, out): &(CubeTensor<R>, CubeTensor<R>, CubeTensor<R>),
 ) -> MatmulAutotuneKey {
-    MatmulAutotuneKey::generate(
+    let key = MatmulAutotuneKey::generate(
         &lhs.client,
         lhs.meta.shape(),
         rhs.meta.shape(),
@@ -550,5 +550,51 @@ fn create_key<R: CubeRuntime>(
         dtype_to_storage_type(out.dtype),
         lhs.try_scheme(),
         rhs.try_scheme(),
-    )
+    );
+
+    // Collision diagnostic (CUBEK_KEY_DEBUG=1): the autotune key buckets m/n/k
+    // (anchored) and stores layout as MatrixBatchLayout, but the gemm *variant*
+    // is chosen from the raw shapes + MatrixLayout. If two calls print the SAME
+    // `key=` line with DIFFERENT `variant=`, the cache will mis-apply a kernel
+    // benchmarked for one to the other (the fast→slow + kernel-growth bug).
+    if std::env::var("CUBEK_KEY_DEBUG").is_ok() {
+        let (lsh, rsh) = (lhs.meta.shape(), rhs.meta.shape());
+        let (ls, rs) = (lhs.meta.strides(), rhs.meta.strides());
+        eprintln!(
+            "CUBEK_KEY variant={} key={key:?} | lhs_shape={lsh:?} lhs_strides={ls:?} \
+             rhs_shape={rsh:?} rhs_strides={rs:?}",
+            derive_gemm_variant(lsh, rsh, ls, rs),
+        );
+    }
+
+    key
+}
+
+/// Mirror of cubek's `MatmulOperandLayouts::from_problem(..).variant()` so the
+/// collision diagnostic shows which kernel variant a given (shape, layout) will
+/// route to. Kept in sync with `cubek-matmul/.../batch/gemm/config.rs`.
+fn derive_gemm_variant(lsh: &[usize], rsh: &[usize], ls: &[usize], rs: &[usize]) -> &'static str {
+    let (nl, nr) = (lsh.len(), rsh.len());
+    let (m, n) = (lsh[nl - 2], rsh[nr - 1]);
+    // lhs: m==1 → Vector (k-contig); else RowMajor iff k (last) is unit-stride.
+    let (lhs_k_contig, lhs_m_contig) = if m == 1 {
+        (true, false)
+    } else {
+        let row = ls[nl - 1] == 1;
+        (row, !row)
+    };
+    // rhs: n==1 → Vector (k-contig); else RowMajor iff n (last) is unit-stride.
+    let (rhs_k_contig, rhs_n_contig) = if n == 1 {
+        (true, false)
+    } else {
+        let row = rs[nr - 1] == 1;
+        (!row, row)
+    };
+    match (lhs_k_contig, rhs_k_contig, rhs_n_contig, lhs_m_contig) {
+        (true, true, _, _) => "Dot",
+        (true, _, true, _) => "OuterNLhsContig",
+        (_, _, true, true) => "OuterNLhsStrided",
+        (_, true, _, true) => "OuterM",
+        _ => "unclassified",
+    }
 }
