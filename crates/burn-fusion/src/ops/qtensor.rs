@@ -8,9 +8,10 @@ use burn_backend::{
     tensor::{Device, FloatTensor, IntTensor, QuantizedTensor},
 };
 use burn_ir::{
-    BaseOperationIr, DequantizeOpIr, FlipOpIr, FloatOperationIr, GatherOpIr, HandleContainer,
-    InitOperationIr, MatmulOpIr, OperationIr, OperationOutput, PermuteOpIr,
+    BaseOperationIr, CustomOpIr, DequantizeOpIr, FlipOpIr, FloatOperationIr, GatherOpIr,
+    HandleContainer, InitOperationIr, MatmulOpIr, OperationIr, OperationOutput, PermuteOpIr,
     QuantizationParametersIr, QuantizeOpIr, SelectOpIr, ShapeOpIr, SliceOpIr, SwapDimsOpIr,
+    TensorIr,
 };
 
 use crate::{
@@ -24,12 +25,10 @@ use super::NoOp;
 
 impl<B: FusionBackend> QTensorOps<Self> for Fusion<B> {
     fn q_linear(activation: FloatTensor<Self>, weight: QuantizedTensor<Self>) -> FloatTensor<Self> {
-        // Route `q_linear` (act @ weightᵀ) through the FUSABLE quantized matmul instead
-        // of an opaque CustomOp barrier. The MatmulFuser dequant-reads the quantized
-        // weight and fuses the surrounding elementwise (rms_norm in, residual/silu out)
-        // on read/write — un-blocking fusion at EVERY projection (prefill + decode),
-        // which is what a barrier prevented. weight is `[n, k]` → transpose to `[k, n]`
-        // so `act[m, k] @ weightᵀ[k, n] = [m, n]`.
+        // Fusable: lower to a quantized matmul `act @ weightᵀ` so the MatmulFuser
+        // dequant-reads the codebook weight (QuantMode::Codebook is supported in the
+        // fused dequant) and fuses the surrounding elementwise. weight `[n,k]` →
+        // transpose to `[k,n]`.
         let weight_t = Self::q_swap_dims(weight, 0, 1);
         Self::q_matmul(
             TensorPrimitive::Float(activation),
