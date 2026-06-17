@@ -15,33 +15,38 @@ use burn_backend::{DType, Shape, TensorMetadata};
 use cubecl::{CubeDim, CubeCount, prelude::*};
 
 #[cube(launch)]
-fn flash_decode_kernel<F: Numeric>(
+fn flash_decode_kernel<F: Float>(
     q: &Tensor<F>,
     k: &Tensor<F>,
     v: &Tensor<F>,
     mask: &Tensor<F>,
     out: &mut Tensor<F>,
-    n_q: u32,
-    n_k: u32,
-    #[comptime] n_heads: u32,
-    #[comptime] n_kv: u32,
-    #[comptime] head_dim: u32,
+    n_q: usize,
+    n_k: usize,
+    #[comptime] n_heads: usize,
+    #[comptime] n_kv: usize,
+    #[comptime] head_dim: usize,
     #[comptime] scale: f32,
 ) {
     // One unit per (query_row, head).
+    let pos = ABSOLUTE_POS as usize;
     let total = n_q * n_heads;
-    if ABSOLUTE_POS >= total {
+    if pos >= total {
         terminate!();
     }
-    let i = ABSOLUTE_POS / n_heads; // query row
-    let h = ABSOLUTE_POS % n_heads; // query head
+    let i = pos / n_heads; // query row
+    let h = pos % n_heads; // query head
     let groups = comptime!(n_heads / n_kv);
     let kv = h / groups;
 
     let q_off = i * n_heads * head_dim + h * head_dim;
+    let scale_f = F::cast_from(scale);
+    let neg_inf = F::cast_from(-1.0e30_f32);
 
-    // Online-softmax running state.
-    let mut m = F::from_int(-1000000000); // running max (−inf proxy)
+    // Online-softmax running state. Masked keys carry an additive −inf, so exp(s−m)=0
+    // for them — no branch needed (key 0 is always visible in causal decode, so a row
+    // is never fully masked ⇒ no div-by-zero).
+    let mut m = neg_inf; // running max (−inf proxy)
     let mut l = F::from_int(0); // running denom
     let mut acc = Array::<F>::new(head_dim);
     #[unroll]
@@ -51,31 +56,28 @@ fn flash_decode_kernel<F: Numeric>(
 
     for j in 0..n_k {
         let masked = mask[i * n_k + j];
-        // Skip fully-masked keys (−inf additive) — they contribute nothing.
-        if masked > F::from_int(-1000000000) {
-            let k_off = j * n_kv * head_dim + kv * head_dim;
-            let mut dot = F::from_int(0);
-            #[unroll]
-            for d in 0..head_dim {
-                dot += q[q_off + d] * k[k_off + d];
-            }
-            let s = dot * F::cast_from(scale) + masked;
-
-            let m_new = Max::max(m, s);
-            let alpha = Exp::exp(m - m_new);
-            let p = Exp::exp(s - m_new);
-            l = l * alpha + p;
-            let v_off = j * n_kv * head_dim + kv * head_dim;
-            #[unroll]
-            for d in 0..head_dim {
-                acc[d] = acc[d] * alpha + p * v[v_off + d];
-            }
-            m = m_new;
+        let k_off = j * n_kv * head_dim + kv * head_dim;
+        let mut dot = F::from_int(0);
+        #[unroll]
+        for d in 0..head_dim {
+            dot += q[q_off + d] * k[k_off + d];
         }
+        let s = dot * scale_f + masked;
+
+        let m_new = if s > m { s } else { m };
+        let alpha = F::exp(m - m_new);
+        let p = F::exp(s - m_new);
+        l = l * alpha + p;
+        let v_off = j * n_kv * head_dim + kv * head_dim;
+        #[unroll]
+        for d in 0..head_dim {
+            acc[d] = acc[d] * alpha + p * v[v_off + d];
+        }
+        m = m_new;
     }
 
     let out_off = i * n_heads * head_dim + h * head_dim;
-    let inv_l = recip(l);
+    let inv_l = F::recip(l);
     #[unroll]
     for d in 0..head_dim {
         out[out_off + d] = acc[d] * inv_l;
@@ -123,11 +125,11 @@ pub fn flash_decode_attention<R: CubeRuntime>(
                 v.as_tensor_arg(1),
                 mask.as_tensor_arg(1),
                 out.as_tensor_arg(1),
-                ScalarArg::new(n_q as u32),
-                ScalarArg::new(n_k as u32),
-                n_heads as u32,
-                n_kv as u32,
-                head_dim as u32,
+                ScalarArg::new(n_q),
+                ScalarArg::new(n_k),
+                n_heads,
+                n_kv,
+                head_dim,
                 scale,
             )
         };
