@@ -6,7 +6,10 @@ use cubecl::{
     ir::{ElemType, FloatKind, StorageType, UIntKind},
     prelude::*,
 };
-use cubek::quantization::{dequantize::dequantize_symmetric_packed_value_at, scheme::QuantMode};
+use cubek::quantization::{
+    dequantize::dequantize_symmetric_packed_value_at,
+    scheme::{QuantMode, codebook_for},
+};
 
 #[cube]
 /// Fuse element-wise operations at the given write position.
@@ -864,13 +867,16 @@ fn dequantize<C: Float, N: Size>(
     let scales =
         input_as_scales_view::<QParamType, Const<1>>(inputs, pos, tensor_pos, scheme.level, config);
 
+    // The TQ codebook centroids (comptime, derived from the scheme) — added to the
+    // cubek dequant signature alongside `scheme`.
+    let codebook = comptime!(codebook_for(scheme.value));
     let result = dequantize_symmetric_packed_value_at::<
         C,
         NumQuant,
         QParamType,
         QStoreType,
         QStoreSize,
-    >(write_pos * num_quants, input, &scales, scheme);
+    >(write_pos * num_quants, input, &scales, codebook, scheme);
 
     let mut vector = Vector::empty();
 
