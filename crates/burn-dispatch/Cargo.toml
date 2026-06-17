@@ -23,6 +23,7 @@ default = [
     "burn-autodiff?/default",
     "burn-cpu?/default",
     "burn-cuda?/default",
+    "burn-metal4?/default",
     "burn-flex/default",
     "burn-ndarray?/default",
     "burn-rocm?/default",
@@ -35,6 +36,7 @@ std = [
     "burn-autodiff?/std",
     "burn-cpu?/std",
     "burn-cuda?/std",
+    "burn-metal4?/std",
     "burn-flex/std",
     "burn-ndarray?/std",
     "burn-rocm?/std",
@@ -45,6 +47,7 @@ tracing = [
     "burn-autodiff?/tracing",
     "burn-cpu?/tracing",
     "burn-cuda?/tracing",
+    "burn-metal4?/tracing",
     "burn-flex/tracing",
     "burn-ndarray?/tracing",
     "burn-rocm?/tracing",
@@ -54,6 +57,7 @@ tracing = [
 
 # Backends
 cuda = ["burn-cuda"]
+metal4 = ["burn-metal4"]
 flex = [] # default
 rocm = ["burn-rocm"]
 ndarray = ["burn-ndarray"]
@@ -71,18 +75,21 @@ remote-server = ["remote", "burn-remote/server"]
 autotune = [
     "burn-wgpu?/autotune",
     "burn-cuda?/autotune",
+    "burn-metal4?/autotune",
     "burn-rocm?/autotune",
     "burn-cpu?/autotune",
 ]
 autotune-checks = [
     "burn-wgpu?/autotune-checks",
     "burn-cuda?/autotune-checks",
+    "burn-metal4?/autotune-checks",
     "burn-rocm?/autotune-checks",
     "burn-cpu?/autotune-checks",
 ]
 fusion = [
     "burn-wgpu?/fusion",
     "burn-cuda?/fusion",
+    "burn-metal4?/fusion",
     "burn-rocm?/fusion",
     "burn-cpu?/fusion",
 ]
@@ -94,6 +101,7 @@ burn-backend = { workspace = true }
 burn-autodiff = { workspace = true, optional = true }
 burn-cpu = { workspace = true, optional = true }
 burn-cuda = { workspace = true, optional = true }
+burn-metal4 = { workspace = true, optional = true }
 burn-flex = { workspace = true }
 burn-ndarray = { workspace = true, optional = true }
 burn-tch = { workspace = true, optional = true }
