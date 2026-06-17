@@ -29,11 +29,20 @@ pub enum MatmulStrategy {
 
 impl Default for MatmulStrategy {
     fn default() -> Self {
+        // iOS: never autotune matmul. On-device benchmarking is both slow (~15 s of
+        // a ~30 s cold start) AND unreliable — a phone is a noisy, thermally-throttled
+        // benchmark host, so autotune picks a different (sometimes catastrophic, 5×)
+        // kernel each cold launch (observed: same build, infer 4.3 s vs 21 s). Use the
+        // heuristic `Cube` strategy: one kernel per shape, chosen by shape analysis,
+        // deterministic, no benchmarking. The kernel choice is decided off-device.
+        #[cfg(target_os = "ios")]
+        return MatmulStrategy::Cube;
+
         // if autotune is enabled, default to autotune
-        #[cfg(feature = "autotune")]
+        #[cfg(all(feature = "autotune", not(target_os = "ios")))]
         return MatmulStrategy::Autotune;
 
-        #[cfg(not(feature = "autotune"))]
+        #[cfg(all(not(feature = "autotune"), not(target_os = "ios")))]
         MatmulStrategy::Cube
     }
 }
