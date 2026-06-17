@@ -167,6 +167,8 @@ impl AutodiffBackend for Dispatch {
                 DispatchTensorKind::Cuda(tensor) => tensor.autodiff().backward(),
                 #[cfg(feature = "metal")]
                 DispatchTensorKind::Metal(tensor) => tensor.autodiff().backward(),
+                #[cfg(feature = "metal4")]
+                DispatchTensorKind::Metal4(tensor) => tensor.autodiff().backward(),
                 #[cfg(feature = "rocm")]
                 DispatchTensorKind::Rocm(tensor) => tensor.autodiff().backward(),
                 #[cfg(feature = "vulkan")]
@@ -213,6 +215,11 @@ impl AutodiffBackend for Dispatch {
                     .as_autodiff()
                     .grad(grads)
                     .map(|t| DispatchTensorKind::Metal(crate::BackendTensor::Float(t))),
+                #[cfg(feature = "metal4")]
+                DispatchTensorKind::Metal4(tensor) => tensor
+                    .as_autodiff()
+                    .grad(grads)
+                    .map(|t| DispatchTensorKind::Metal4(crate::BackendTensor::Float(t))),
                 #[cfg(feature = "rocm")]
                 DispatchTensorKind::Rocm(tensor) => tensor
                     .as_autodiff()
@@ -287,6 +294,11 @@ impl AutodiffBackend for Dispatch {
                     .as_autodiff()
                     .grad_remove(grads)
                     .map(|t| DispatchTensorKind::Metal(crate::BackendTensor::Float(t))),
+                #[cfg(feature = "metal4")]
+                DispatchTensorKind::Metal4(tensor) => tensor
+                    .as_autodiff()
+                    .grad_remove(grads)
+                    .map(|t| DispatchTensorKind::Metal4(crate::BackendTensor::Float(t))),
                 #[cfg(feature = "rocm")]
                 DispatchTensorKind::Rocm(tensor) => tensor
                     .as_autodiff()
@@ -424,6 +436,10 @@ impl AutodiffBackend for Dispatch {
                 DispatchTensorKind::Metal(tensor) => DispatchTensorKind::Metal(
                     crate::BackendTensor::Float(tensor.autodiff().primitive),
                 ),
+                #[cfg(feature = "metal4")]
+                DispatchTensorKind::Metal4(tensor) => DispatchTensorKind::Metal4(
+                    crate::BackendTensor::Float(tensor.autodiff().primitive),
+                ),
                 #[cfg(feature = "rocm")]
                 DispatchTensorKind::Rocm(tensor) => DispatchTensorKind::Rocm(
                     crate::BackendTensor::Float(tensor.autodiff().primitive),
@@ -503,6 +519,12 @@ impl AutodiffBackend for Dispatch {
             DispatchTensorKind::Metal(tensor) => {
                 DispatchTensorKind::Autodiff(Box::new(DispatchTensorKind::Metal(
                     crate::BackendTensor::Autodiff(Autodiff::<Metal>::from_inner(tensor.float())),
+                )))
+            }
+            #[cfg(feature = "metal4")]
+            DispatchTensorKind::Metal4(tensor) => {
+                DispatchTensorKind::Autodiff(Box::new(DispatchTensorKind::Metal4(
+                    crate::BackendTensor::Autodiff(Autodiff::<Metal4>::from_inner(tensor.float())),
                 )))
             }
             #[cfg(feature = "rocm")]
@@ -760,6 +782,8 @@ impl DispatchTensorKind {
             DispatchTensorKind::Cuda(tensor) => DispatchDevice::Cuda(tensor.device()),
             #[cfg(feature = "metal")]
             DispatchTensorKind::Metal(tensor) => DispatchDevice::Metal(tensor.device()),
+            #[cfg(feature = "metal4")]
+            DispatchTensorKind::Metal4(tensor) => DispatchDevice::Metal4(tensor.device()),
             #[cfg(feature = "rocm")]
             DispatchTensorKind::Rocm(tensor) => DispatchDevice::Rocm(tensor.device()),
             #[cfg(feature = "vulkan")]
