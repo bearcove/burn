@@ -196,6 +196,7 @@ burn-cpu = { path = "crates/burn-cpu", version = "0.22.0-pre.1", default-feature
 burn-cubecl = { path = "crates/burn-cubecl", version = "0.22.0-pre.1", default-features = false }
 burn-cubecl-fusion = { path = "crates/burn-cubecl-fusion", version = "0.22.0-pre.1", default-features = false }
 burn-cuda = { path = "crates/burn-cuda", version = "0.22.0-pre.1", default-features = false }
+burn-metal4 = { path = "crates/burn-metal4", version = "0.22.0-pre.1", default-features = false }
 burn-dataset = { path = "crates/burn-dataset", version = "0.22.0-pre.1", default-features = false }
 burn-derive = { path = "crates/burn-derive", version = "0.22.0-pre.1", default-features = false }
 burn-dispatch = { path = "crates/burn-dispatch", version = "0.22.0-pre.1", default-features = false }
