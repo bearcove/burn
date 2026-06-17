@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use burn_backend::{
     DType, ExecutionError, FloatDType, Shape, Slice, TensorData, TensorMetadata, TensorPrimitive,
     get_device_settings,
-    ops::QTensorOps,
+    ops::{FloatTensorOps, QTensorOps},
     quantization::{QuantPropagation, QuantScheme, QuantizationParametersPrimitive},
     tensor::{Device, FloatTensor, IntTensor, QuantizedTensor},
 };
