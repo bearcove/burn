@@ -507,19 +507,6 @@ impl<B: FusionBackend> FloatTensorOps<Self> for Fusion<B> {
     fn float_matmul(lhs: FloatTensor<Self>, rhs: FloatTensor<Self>) -> FloatTensor<Self> {
         binary_float_ops!(MatmulOps, B::float_matmul);
 
-        // TEMP PROBE (remove): catch the pathological k=262144 distill_kv backward matmul.
-        // Print shapes + a backtrace at the CREATION site so we can find which op builds it.
-        if let (Some(&lk), Some(&rk)) = (lhs.shape.last(), rhs.shape.iter().rev().nth(1)) {
-            if lk.max(rk) >= 200_000 {
-                eprintln!(
-                    "[MATMUL-PROBE] huge matmul lhs={:?} rhs={:?}\n{}",
-                    lhs.shape,
-                    rhs.shape,
-                    std::backtrace::Backtrace::force_capture()
-                );
-            }
-        }
-
         let streams = StreamId::current();
 
         let client = lhs.client.clone();
