@@ -8,10 +8,9 @@ use burn_backend::{
     tensor::{Device, FloatTensor, IntTensor, QuantizedTensor},
 };
 use burn_ir::{
-    BaseOperationIr, CustomOpIr, DequantizeOpIr, FlipOpIr, FloatOperationIr, GatherOpIr,
-    HandleContainer, InitOperationIr, MatmulOpIr, OperationIr, OperationOutput, PermuteOpIr,
+    BaseOperationIr, DequantizeOpIr, FlipOpIr, FloatOperationIr, GatherOpIr, HandleContainer,
+    InitOperationIr, MatmulOpIr, OperationIr, OperationOutput, PermuteOpIr,
     QuantizationParametersIr, QuantizeOpIr, SelectOpIr, ShapeOpIr, SliceOpIr, SwapDimsOpIr,
-    TensorIr,
 };
 
 use crate::{
@@ -25,45 +24,18 @@ use super::NoOp;
 
 impl<B: FusionBackend> QTensorOps<Self> for Fusion<B> {
     fn q_linear(activation: FloatTensor<Self>, weight: QuantizedTensor<Self>) -> FloatTensor<Self> {
-        // `q_linear` is the W4A16 dequant-on-read matvec (cubek `qa_gemv`). It has no
-        // fusion IR, and the trait default (`dequantize → transpose → matmul`) would
-        // materialize the dense weight and lose the kernel. So register it as a
-        // Custom (barrier) op that runs the EAGER backend's `q_linear`; Fusion fuses
-        // the surrounding elementwise glue (rms_norm feeding it, residual after) up
-        // to this barrier, while the matvec stays the optimized kernel.
-        #[derive(new, Debug)]
-        struct QLinearOps<B: FusionBackend> {
-            desc: CustomOpIr,
-            _b: PhantomData<B>,
-        }
-
-        impl<B: FusionBackend> Operation<B::FusionRuntime> for QLinearOps<B> {
-            fn execute(&self, handles: &mut HandleContainer<B::Handle>) {
-                let ([act, w], [out]) = self.desc.as_fixed::<2, 1>();
-                let activation = handles.get_float_tensor::<B>(act);
-                let weight = handles.get_quantized_tensor::<B>(w);
-                let output = B::q_linear(activation, weight);
-                handles.register_float_tensor::<B>(&out.id, output);
-            }
-        }
-
-        let client = activation.client.clone();
-        let streams = StreamId::current();
-        // activation `[.., k]`, weight `[n, k]` ⇒ out `[m, n]` (m = elems / k), matching
-        // the eager q_linear's flattened output.
-        let k = *activation.shape.last().expect("q_linear activation rank >= 1");
-        let m: usize = activation.shape.iter().product::<usize>() / k;
-        let n = weight.shape[0];
-        let dtype = activation.dtype;
-        let out = TensorIr::uninit(client.create_empty_handle(), Shape::new([m, n]), dtype);
-        let desc = CustomOpIr::new("q_linear", &[activation.into_ir(), weight.into_ir()], &[out]);
-        client
-            .register(
-                streams,
-                OperationIr::Custom(desc.clone()),
-                QLinearOps::<B>::new(desc),
-            )
-            .output()
+        // Route `q_linear` (act @ weightᵀ) through the FUSABLE quantized matmul instead
+        // of an opaque CustomOp barrier. The MatmulFuser dequant-reads the quantized
+        // weight and fuses the surrounding elementwise (rms_norm in, residual/silu out)
+        // on read/write — un-blocking fusion at EVERY projection (prefill + decode),
+        // which is what a barrier prevented. weight is `[n, k]` → transpose to `[k, n]`
+        // so `act[m, k] @ weightᵀ[k, n] = [m, n]`.
+        let weight_t = Self::q_swap_dims(weight, 0, 1);
+        Self::q_matmul(
+            TensorPrimitive::Float(activation),
+            TensorPrimitive::QFloat(weight_t),
+        )
+        .tensor()
     }
 
     fn q_from_data(data: TensorData, device: &Device<Self>) -> QuantizedTensor<Self> {
