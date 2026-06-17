@@ -67,7 +67,15 @@ pub(crate) fn select_assign<R: CubeRuntime>(
     is_bool: bool,
     assign: bool,
 ) -> CubeTensor<R> {
-    let tensor = match tensor.can_mut() && tensor.is_nonoverlapping() {
+    let (cm, no) = (tensor.can_mut(), tensor.is_nonoverlapping());
+    if std::env::var("SA_DEBUG").is_ok() {
+        eprintln!(
+            "[select_assign] shape={:?} can_mut={cm} nonoverlap={no} => {}",
+            tensor.meta.shape(),
+            if cm && no { "INPLACE" } else { "COPY" }
+        );
+    }
+    let tensor = match cm && no {
         true => tensor,
         false => tensor.copy(),
     };
