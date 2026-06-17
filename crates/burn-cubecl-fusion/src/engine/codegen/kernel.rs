@@ -821,9 +821,12 @@ fn dequantize<C: Float, N: Size>(
             | QuantValue::Q4S
             | QuantValue::Q2F
             | QuantValue::Q2S
+            | QuantValue::Q6F
             | QuantValue::E2M1 => unreachable!("Can't store native sub-byte values"),
         },
-        QuantStore::PackedU32(_) => ElemType::UInt(UIntKind::U32).into(),
+        QuantStore::PackedU32(_) | QuantStore::PackedU32Dense(_) => {
+            ElemType::UInt(UIntKind::U32).into()
+        }
         QuantStore::PackedNative(_) => match scheme.value {
             QuantValue::E2M1 => StorageType::Packed(ElemType::Float(FloatKind::E4M3), 2),
             other => panic!("{other:?} doesn't support native packing"),
