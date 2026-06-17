@@ -15,14 +15,17 @@ use cubek::matmul::{
     routines::{
         BlueprintStrategy, TileSizeSelection,
         batch::{
-            double_buffering::DoubleBufferingArgs, double_unit::DoubleUnitSelectionArgs,
-            ordered_double_buffering::OrderedSelectionArgs, simple::SimpleArgs,
-            simple_unit::SimpleUnitSelectionArgs,
+            double_buffering::DoubleBufferingArgs, ordered_double_buffering::OrderedSelectionArgs,
+            simple::SimpleArgs, simple_unit::SimpleUnitSelectionArgs,
         },
         gemm::GemmStrategy,
     },
     strategy::{MatmulAutotuneKey, MatmulGlobalScale, Strategy, should_tune_double_buffering},
 };
+// Only referenced by the full (desktop/CUDA) unit-matmul sweep; the iOS build
+// prunes DoubleUnit to keep the on-device shader-compile count down.
+#[cfg(not(target_os = "ios"))]
+use cubek::matmul::routines::batch::double_unit::DoubleUnitSelectionArgs;
 
 fn matmul_input_gen<R: CubeRuntime>(
     _key: &MatmulAutotuneKey,
@@ -191,8 +194,26 @@ pub fn matmul_autotune<R: CubeRuntime>(
             }),
         );
 
-        // Matrix Vector multiplication kernels.
-        for (strategy, double_buf) in [
+        // Matrix Vector multiplication kernels. iOS drops the double-buffered
+        // variant (DoubleVecMat) for the same shader-compile-count reason as the
+        // unit sweep above; SimpleVecMat + Gemm + GemvUnitPerpendicular remain.
+        #[cfg(target_os = "ios")]
+        let vecmat_strategies = [
+            (
+                Strategy::SimpleVecMat(BlueprintStrategy::Inferred(().into())),
+                false,
+            ),
+            (
+                Strategy::Gemm(BlueprintStrategy::Inferred(Default::default())),
+                false,
+            ),
+            (
+                Strategy::GemvUnitPerpendicular(BlueprintStrategy::Inferred(Default::default())),
+                false,
+            ),
+        ];
+        #[cfg(not(target_os = "ios"))]
+        let vecmat_strategies = [
             (
                 Strategy::DoubleVecMat(BlueprintStrategy::Inferred(().into())),
                 true,
@@ -209,7 +230,8 @@ pub fn matmul_autotune<R: CubeRuntime>(
                 Strategy::GemvUnitPerpendicular(BlueprintStrategy::Inferred(Default::default())),
                 false,
             ),
-        ] {
+        ];
+        for (strategy, double_buf) in vecmat_strategies {
             set = set.with(
                 Tunable::new(&strategy.to_string(), move |(lhs, rhs, out)| {
                     launch_matmul::<R>(&strategy, lhs, rhs, out)
@@ -222,12 +244,33 @@ pub fn matmul_autotune<R: CubeRuntime>(
             );
         }
 
-        // Unit matmuls
-        for tile_size in [
+        // Unit matmuls.
+        //
+        // MOBILE (iOS): the on-device Metal shader compiler is ~10× slower than
+        // desktop (~600 ms per `matmul_entry` variant), and autotune both compiles
+        // AND benchmarks every candidate. On a phone the {MaxTile,MinTile} ×
+        // {Simple,Double} sweep = 4 unit kernels/shape dominated the ~30 s cold
+        // warmup (75 variants ≈ 8.6 s compile + ~15 s bench). Prune to a single
+        // unit candidate (SimpleUnit @ MaxTile) — for the small mobile matmuls the
+        // tile/double-buffer variants are near-indistinguishable, and the warm RTF
+        // confirms no regression. Desktop/CUDA keep the full sweep.
+        #[cfg(target_os = "ios")]
+        let unit_tile_sizes = [TileSizeSelection::MaxTileSize];
+        #[cfg(not(target_os = "ios"))]
+        let unit_tile_sizes = [
             TileSizeSelection::MaxTileSize,
             TileSizeSelection::MinTileSize,
-        ] {
-            for (strategy, double_buf) in [
+        ];
+        for tile_size in unit_tile_sizes {
+            #[cfg(target_os = "ios")]
+            let unit_strategies = [(
+                Strategy::SimpleUnit(BlueprintStrategy::Inferred(SimpleUnitSelectionArgs {
+                    tile_size,
+                })),
+                false,
+            )];
+            #[cfg(not(target_os = "ios"))]
+            let unit_strategies = [
                 (
                     Strategy::SimpleUnit(BlueprintStrategy::Inferred(SimpleUnitSelectionArgs {
                         tile_size,
@@ -240,7 +283,8 @@ pub fn matmul_autotune<R: CubeRuntime>(
                     })),
                     true,
                 ),
-            ] {
+            ];
+            for (strategy, double_buf) in unit_strategies {
                 set = set.with(
                     Tunable::new(&strategy.to_string(), move |(lhs, rhs, out)| {
                         launch_matmul::<R>(&strategy, lhs, rhs, out)
