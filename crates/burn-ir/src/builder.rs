@@ -226,7 +226,11 @@ impl_ir_create!(
         rhs: TensorIr
     },
     shape = lhs.shape.broadcast(&rhs.shape).unwrap(),
-    dtype = output_dtype([&lhs.dtype, &rhs.dtype]).unwrap(),
+    // Quant-aware: a binary op may mix a `QFloat` operand with a `Float` (e.g. the
+    // residual add of a quantized-matmul projection output + a float hidden). The
+    // `dtype_compat` rule (which the matmul path already uses) dequantizes the QFloat
+    // operand on read; for non-quant pairs it still requires `lhs == rhs`.
+    dtype = output_dtype_mixed([&lhs.dtype, &rhs.dtype]).unwrap(),
     // Additional constructor for binary comparisons
     create_comparison(bool_dtype: DType)
 );
