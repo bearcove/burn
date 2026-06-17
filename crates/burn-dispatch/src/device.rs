@@ -278,6 +278,12 @@ impl Default for DispatchDevice {
         #[cfg(feature = "cuda")]
         return Self::Cuda(CudaDevice::default());
 
+        // Native Metal 4 is the preferred Apple GPU default: when enabled it wins
+        // over the wgpu→Metal path (faster decode kernels, real GPU timestamps).
+        // Override with `BURN_DEVICE=wgpu`/`metal`.
+        #[cfg(feature = "metal4")]
+        return Self::Metal4(Metal4Device::default());
+
         #[cfg(feature = "metal")]
         return Self::Metal(burn_wgpu::WgpuDevice::default());
 
@@ -292,12 +298,6 @@ impl Default for DispatchDevice {
 
         #[cfg(feature = "wgpu")]
         return Self::Wgpu(burn_wgpu::WgpuDevice::default());
-
-        // Metal4 is opt-in (explicit `Device::metal4()` / `BURN_DEVICE=metal4`);
-        // it sits below `wgpu` so enabling both keeps the shipped wgpu-Metal
-        // default unless explicitly overridden.
-        #[cfg(feature = "metal4")]
-        return Self::Metal4(Metal4Device::default());
 
         #[cfg(feature = "cpu")]
         return Self::Cpu(CpuDevice);
