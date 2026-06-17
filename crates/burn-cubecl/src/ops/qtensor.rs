@@ -413,12 +413,11 @@ impl<R: CubeRuntime> QTensorOps<Self> for CubeBackend<R> {
             TensorPrimitive::QFloat(rhs) => (out_dtype, rhs),
         };
 
-        let strategy = MatmulStrategy::default();
         let out = match kernel::matmul::matmul(
             lhs.clone(),
             rhs.clone(),
             None,
-            strategy,
+            MatmulStrategy::default(),
             out_dtype,
         ) {
             Ok(out) => out,
@@ -438,7 +437,7 @@ impl<R: CubeRuntime> QTensorOps<Self> for CubeBackend<R> {
                 } else {
                     rhs
                 };
-                kernel::matmul::matmul(lhs, rhs, None, strategy, out_dtype)
+                kernel::matmul::matmul(lhs, rhs, None, MatmulStrategy::default(), out_dtype)
                     .expect("q_matmul: dequantized fallback also failed")
             }
         };
