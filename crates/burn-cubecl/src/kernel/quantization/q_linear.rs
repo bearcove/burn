@@ -40,8 +40,11 @@ pub fn q_linear<R: CubeRuntime>(activation: CubeTensor<R>, weight: CubeTensor<R>
     );
     let (codes, scales) = weight.quantized_handles().unwrap();
     let cb = super::tables::codebook_for(scheme.value);
-    // Non-empty signs ⇒ fold bee's forward-RHT (prerot) into the matvec.
-    let rht = super::tables::rht_signs();
+    // PLAIN matvec: the forward-RHT (prerot) is now applied by the caller as a
+    // fusable op on the activation (helix `rht_forward`), so the kernel must NOT
+    // rotate again. Empty signs ⇒ plain dequant-on-read matmul (matches the fusion
+    // q_matmul path, which is also plain).
+    let rht = cubek::quantization::qa_matmul::RhtSigns(&[]);
 
     macro_rules! launch {
         ($f:ty) => {
