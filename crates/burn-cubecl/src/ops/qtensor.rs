@@ -8,7 +8,7 @@ use burn_backend::{
     },
     tensor::{Device, FloatTensor, QuantizedTensor},
 };
-use burn_std::{FloatDType, Metadata};
+use burn_std::{FloatDType, Metadata, Strides, strides};
 use cubecl::server::{MemoryLayout, MemoryLayoutDescriptor, MemoryLayoutStrategy};
 use cubecl::{e2m1x2, quant::scheme::QuantStore};
 
@@ -160,6 +160,114 @@ fn new_quantized<R: CubeRuntime>(
         strides,
         DType::QFloat(scheme),
         qparams,
+    )
+}
+
+/// Contiguous (row-major) strides for `shape`.
+fn contiguous_strides(shape: &Shape) -> Strides {
+    let ndims = shape.num_dims();
+    let mut out = strides![0; ndims];
+    let mut current = 1usize;
+    for i in (0..ndims).rev() {
+        out[i] = current;
+        current *= shape[i];
+    }
+    out
+}
+
+/// Build a quantized [`CubeTensor`] whose packed codes AND scales are backed by
+/// **external, caller-owned** memory (zero-copy weight load — no `memcpy`).
+///
+/// `ptr` is the address of the contiguous `[codes | scales]` span (the pack stores
+/// `.qs` immediately followed by `.scales`, both page-aligned; verified gap=0), and
+/// `data_bytes` / `scales_bytes` are their byte lengths. This wraps that span as a
+/// single no-copy buffer with the scales sliced out by offset — identical layout to
+/// the copy path ([`new_quantized`]), so [`CubeTensor::scales`] / `quantized_handles`
+/// work unchanged.
+///
+/// # Safety
+/// `ptr` must be page-aligned, valid for `data_bytes + scales_bytes`, and the caller
+/// MUST keep the backing mapping alive for at least as long as the returned tensor
+/// (and any GPU work that reads it).
+pub unsafe fn new_qtensor_external<R: CubeRuntime>(
+    ptr: u64,
+    data_bytes: usize,
+    scales_bytes: usize,
+    shape: impl Into<Shape>,
+    scheme: QuantScheme,
+    device: &R::Device,
+) -> CubeTensor<R> {
+    let client = R::client(device);
+    let shape: Shape = shape.into();
+    let mut shape_value: Shape = shape.clone();
+    let rank = shape.rank();
+    let shape_last = shape[rank - 1];
+    let num_quants = scheme.num_quants();
+
+    // Packed-data shape + element size — same arithmetic as `new_quantized`.
+    let data_size = match scheme.store {
+        QuantStore::PackedU32(_) => {
+            assert!(shape_last.is_multiple_of(num_quants), "Can't store in u32");
+            shape_value[rank - 1] = shape_last.div_ceil(num_quants);
+            size_of::<u32>()
+        }
+        QuantStore::PackedU32Dense(_) => {
+            let words_per_unit = scheme.size_bits_stored() / 32;
+            shape_value[rank - 1] = shape_last.div_ceil(num_quants) * words_per_unit;
+            size_of::<u32>()
+        }
+        QuantStore::Native => match scheme.value {
+            QuantValue::Q8F | QuantValue::Q8S | QuantValue::E4M3 | QuantValue::E5M2 => {
+                size_of::<i8>()
+            }
+            other => panic!("{other:?}: can't store native sub-byte values"),
+        },
+        QuantStore::PackedNative(_) => match scheme.value {
+            QuantValue::E2M1 => size_of::<e2m1x2>(),
+            other => panic!("{other:?} doesn't support native packing"),
+        },
+    };
+
+    let scales_dtype = match scheme.param {
+        QuantParam::F32 => DType::F32,
+        QuantParam::F16 => DType::F16,
+        QuantParam::BF16 => DType::BF16,
+        QuantParam::UE8M0 | QuantParam::UE4M3 => DType::U8,
+    };
+    let scales_shape = params_shape(&shape, scheme.level);
+
+    // The on-disk layout must match what this CubeTensor will read.
+    assert_eq!(
+        shape_value.num_elements() * data_size,
+        data_bytes,
+        "external qtensor: packed-codes size mismatch"
+    );
+    assert_eq!(
+        scales_shape.num_elements() * scales_dtype.size(),
+        scales_bytes,
+        "external qtensor: scales size mismatch"
+    );
+
+    // One zero-copy buffer over the contiguous [codes | scales] span. Codes at
+    // offset 0; scales sliced out at `offset_start = data_bytes`, ending at the
+    // buffer end (`offset_end = 0`) — exactly the packed copy-path layout.
+    let memory = unsafe { client.create_external(ptr, data_bytes + scales_bytes) };
+
+    let scales = QParamTensor {
+        offset_start: data_bytes,
+        offset_end: 0,
+        metadata: Metadata::new(scales_shape.clone(), contiguous_strides(&scales_shape)),
+        dtype: scales_dtype,
+    };
+
+    CubeTensor::new_quantized(
+        client,
+        memory,
+        shape,
+        device.clone(),
+        contiguous_strides(&shape_value),
+        DType::QFloat(scheme),
+        QParams { scales },
     )
 }
 
