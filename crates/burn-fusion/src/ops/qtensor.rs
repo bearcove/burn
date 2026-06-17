@@ -25,16 +25,20 @@ use super::NoOp;
 
 impl<B: FusionBackend> QTensorOps<Self> for Fusion<B> {
     fn q_linear(activation: FloatTensor<Self>, weight: QuantizedTensor<Self>) -> FloatTensor<Self> {
-        // Fusable: lower to a quantized matmul `act @ weightᵀ` so the MatmulFuser
-        // dequant-reads the codebook weight (QuantMode::Codebook is supported in the
-        // fused dequant) and fuses the surrounding elementwise. weight `[n,k]` →
-        // transpose to `[k,n]`.
-        let weight_t = Self::q_swap_dims(weight, 0, 1);
-        Self::q_matmul(
-            TensorPrimitive::Float(activation),
-            TensorPrimitive::QFloat(weight_t),
+        // Fusable codebook matmul. `q_linear = act @ weightᵀ`, computed as
+        // `(weight @ actᵀ)ᵀ` so the QUANT weight is the LHS read in its native `[n,k]`
+        // row-packed layout (matching the codes/scales packing) — routing it as a
+        // transposed RHS broke because `q_swap_dims` can't repack the codes. The
+        // transposes land on the dense activation + output. The MatmulFuser
+        // dequant-reads the codebook weight (QuantMode::Codebook) and fuses the
+        // surrounding elementwise (rms_norm/RHT in, residual/silu out).
+        let act_t = Self::float_swap_dims(activation, 0, 1); // [m,k] → [k,m]
+        let out_t = Self::q_matmul(
+            TensorPrimitive::QFloat(weight),
+            TensorPrimitive::Float(act_t),
         )
-        .tensor()
+        .tensor(); // [n,m]
+        Self::float_swap_dims(out_t, 0, 1) // [n,m] → [m,n]
     }
 
     fn q_from_data(data: TensorData, device: &Device<Self>) -> QuantizedTensor<Self> {
