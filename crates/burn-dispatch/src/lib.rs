@@ -62,6 +62,10 @@ pub mod backends {
     pub use burn_cuda as cuda;
     #[cfg(feature = "cuda")]
     pub use burn_cuda::Cuda;
+    #[cfg(feature = "metal4")]
+    pub use burn_metal4 as metal4;
+    #[cfg(feature = "metal4")]
+    pub use burn_metal4::Metal4;
     #[cfg(feature = "rocm")]
     pub use burn_rocm as rocm;
     #[cfg(feature = "rocm")]
@@ -106,6 +110,8 @@ pub mod devices {
     pub use burn_cpu::CpuDevice;
     #[cfg(feature = "cuda")]
     pub use burn_cuda::CudaDevice;
+    #[cfg(feature = "metal4")]
+    pub use burn_metal4::Metal4Device;
     #[cfg(feature = "rocm")]
     pub use burn_rocm::RocmDevice;
     #[cfg(feature = "wgpu")]

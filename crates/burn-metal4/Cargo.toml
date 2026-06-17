@@ -1,0 +1,32 @@
+[package]
+authors = ["Amos Wenger"]
+categories = ["science"]
+description = "Native Metal 4 backend for the Burn framework (via cubecl-metal4)"
+edition.workspace = true
+keywords = ["deep-learning", "machine-learning", "gpu", "metal"]
+license.workspace = true
+name = "burn-metal4"
+readme.workspace = true
+repository = "https://github.com/bearcove/burn/tree/main/crates/burn-metal4"
+version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["std", "fusion", "autotune", "burn-cubecl/default", "cubecl/default"]
+doc = ["burn-cubecl/doc"]
+std = ["burn-cubecl/std", "cubecl/std"]
+fusion = ["burn-fusion", "burn-cubecl/fusion"]
+autotune = ["burn-cubecl/autotune"]
+autotune-checks = ["burn-cubecl/autotune-checks"]
+
+[dependencies]
+burn-fusion = { workspace = true, optional = true, features = ["default"] }
+burn-cubecl = { workspace = true }
+burn-backend = { workspace = true, features = ["cubecl-metal4"] }
+cubecl = { workspace = true, features = ["metal4"] }
+
+[package.metadata.docs.rs]
+features = ["doc"]
+rustdoc-args = ["--cfg", "docsrs"]
