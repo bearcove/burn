@@ -12,7 +12,7 @@
 use crate::{CubeRuntime, tensor::CubeTensor};
 use crate::ops::numeric::empty_device_dtype;
 use burn_backend::{DType, Shape, TensorMetadata};
-use cubecl::{CubeDim, CubeCount, prelude::*};
+use cubecl::{CubeDim, calculate_cube_count_elemwise, prelude::*};
 
 #[cube(launch)]
 fn flash_decode_kernel<F: Float>(
@@ -111,10 +111,9 @@ pub fn flash_decode_attention<R: CubeRuntime>(
         dtype,
     );
 
-    let total = (n_q * n_heads) as u32;
-    let cube_dim = CubeDim::new(256, 1, 1);
-    let cubes = total.div_ceil(256).max(1);
-    let cube_count = CubeCount::Static(cubes, 1, 1);
+    let total = n_q * n_heads;
+    let cube_dim = CubeDim::new(&client, total);
+    let cube_count = calculate_cube_count_elemwise(&client, total, cube_dim);
 
     macro_rules! launch {
         ($f:ty) => {
