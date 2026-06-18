@@ -1,5 +1,5 @@
 use burn_backend::{
-    Backend, ExecutionError, TensorData, TensorMetadata,
+    Backend, DType, ExecutionError, TensorData, TensorMetadata,
     ops::QTensorOps,
     quantization::QuantizationParametersPrimitive,
     tensor::{Device, FloatTensor, IntTensor, QuantizedTensor},
@@ -63,7 +63,11 @@ impl<B: Backend, C: CheckpointStrategy> QTensorOps<Self> for Autodiff<B, C> {
         struct QLinear;
 
         impl<B: Backend> Backward<B, 1> for QLinear {
-            type State = QuantizedTensor<B>;
+            // State carries the activation's float dtype so the backward matmul runs at the
+            // SAME precision as the forward (f16/bf16 activation → f16/bf16 backward → tensor
+            // cores + half-size dense weight), and grad_x comes out in the activation's dtype
+            // (matching the parent node) instead of always f32.
+            type State = (QuantizedTensor<B>, DType);
 
             fn backward(
                 self,
@@ -71,7 +75,7 @@ impl<B: Backend, C: CheckpointStrategy> QTensorOps<Self> for Autodiff<B, C> {
                 grads: &mut Gradients,
                 _checkpointer: &mut Checkpointer,
             ) {
-                let weight = ops.state;
+                let (weight, act_dtype) = ops.state;
                 unary::<B, _>(ops.parents, ops.node, grads, |grad| {
                     // q_linear's forward applies bee's per-32-block forward-RHT (prerot)
                     // to the activation — `R = (1/√32)·H·D_s` (sign, then Walsh-Hadamard)
@@ -79,9 +83,17 @@ impl<B: Backend, C: CheckpointStrategy> QTensorOps<Self> for Autodiff<B, C> {
                     // So grad_x = Rᵀ(grad_y @ dequant(W_rot)), with the adjoint
                     // `Rᵀ = (1/√32)·D_s·H` (Hadamard, then sign). `dequantize` returns the
                     // RHT-space (rotated) weight; the inverse-RHT lives here.
-                    let w = B::dequantize(weight, FloatDType::F32);
-                    let tmp = B::float_matmul(grad, w); // [m, in] in RHT (rotated) space
-                    inverse_rht::<B>(tmp)
+                    //
+                    // Dequant the weight + run the matmul in the ACTIVATION's precision (the
+                    // big win when that's f16/bf16: tensor cores + the dense weight is half the
+                    // bytes — q_linear's output is always f32, so grad arrives f32 and is cast
+                    // down). The RHT adjoint stays in f32 (f16 Hadamard rounding is lossy).
+                    let fdt: FloatDType = act_dtype.into();
+                    let w = B::dequantize(weight, fdt);
+                    let g = B::float_cast(grad, fdt);
+                    let tmp = B::float_matmul(g, w); // [m, in] in RHT (rotated) space
+                    let tmp_f32 = B::float_cast(tmp, FloatDType::F32);
+                    B::float_cast(inverse_rht::<B>(tmp_f32), fdt)
                 });
             }
         }
@@ -91,10 +103,11 @@ impl<B: Backend, C: CheckpointStrategy> QTensorOps<Self> for Autodiff<B, C> {
             .compute_bound()
             .stateful()
         {
-            OpsKind::Tracked(prep) => prep.finish(
-                weight.clone(),
-                B::q_linear(activation.primitive, weight),
-            ),
+            OpsKind::Tracked(prep) => {
+                let act_dtype = activation.primitive.dtype();
+                let out = B::q_linear(activation.primitive, weight.clone());
+                prep.finish((weight, act_dtype), out)
+            }
             OpsKind::UnTracked(prep) => prep.finish(B::q_linear(activation.primitive, weight)),
         }
     }
