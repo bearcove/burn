@@ -8,10 +8,9 @@ use burn_backend::{
     tensor::{Device, FloatTensor, IntTensor, QuantizedTensor},
 };
 use burn_ir::{
-    BaseOperationIr, CustomOpIr, DequantizeOpIr, FlipOpIr, FloatOperationIr, GatherOpIr,
-    HandleContainer, InitOperationIr, MatmulOpIr, OperationIr, OperationOutput, PermuteOpIr,
+    BaseOperationIr, DequantizeOpIr, FlipOpIr, FloatOperationIr, GatherOpIr, HandleContainer,
+    InitOperationIr, MatmulOpIr, OperationIr, OperationOutput, PermuteOpIr,
     QuantizationParametersIr, QuantizeOpIr, SelectOpIr, ShapeOpIr, SliceOpIr, SwapDimsOpIr,
-    TensorIr,
 };
 
 use crate::{
