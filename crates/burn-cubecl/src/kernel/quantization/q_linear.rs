@@ -13,7 +13,7 @@ use burn_backend::{DType, Shape, TensorMetadata};
 /// rotated-and-packed, and the kernel dequantizes each weight column once.
 pub fn q_linear<R: CubeRuntime>(activation: CubeTensor<R>, weight: CubeTensor<R>) -> CubeTensor<R> {
     // PLAIN matvec: caller supplies the activation already prerot'd (helix `rht_forward`).
-    q_linear_inner(activation, weight, cubek::quantization::qa_matmul::RhtSigns(&[]))
+    q_linear_inner(activation, weight, cubek::quantization::qa_matmul::RhtSigns(&[]), None, 0.0)
 }
 
 /// Like [`q_linear`] but the **forward-RHT (prerot) is applied IN-KERNEL** (bee's
@@ -25,13 +25,29 @@ pub fn q_linear_prerot<R: CubeRuntime>(
     activation: CubeTensor<R>,
     weight: CubeTensor<R>,
 ) -> CubeTensor<R> {
-    q_linear_inner(activation, weight, super::tables::rht_signs())
+    q_linear_inner(activation, weight, super::tables::rht_signs(), None, 0.0)
+}
+
+/// Like [`q_linear_prerot`] but ALSO folds an RMSNorm (input_ln/post_ln) into the
+/// gemv: the caller passes the UN-normed, un-rotated activation `[m,k]` plus the
+/// RMSNorm `gamma [k]`; the panel computes `s=rsqrt(mean(h²)+eps)` in-kernel, stages
+/// `h⊙gamma`, RHTs, and scales the output by `s`. Decode (m==1) only — removes the
+/// separate rms_norm reduce launch. `eps` is the RMSNorm epsilon.
+pub fn q_linear_prerot_norm<R: CubeRuntime>(
+    activation: CubeTensor<R>,
+    weight: CubeTensor<R>,
+    gamma: CubeTensor<R>,
+    eps: f32,
+) -> CubeTensor<R> {
+    q_linear_inner(activation, weight, super::tables::rht_signs(), Some(gamma), eps)
 }
 
 fn q_linear_inner<R: CubeRuntime>(
     activation: CubeTensor<R>,
     weight: CubeTensor<R>,
     rht: cubek::quantization::qa_matmul::RhtSigns,
+    gamma: Option<CubeTensor<R>>,
+    eps: f32,
 ) -> CubeTensor<R> {
     let scheme = match weight.dtype {
         DType::QFloat(scheme) => scheme,
@@ -61,6 +77,13 @@ fn q_linear_inner<R: CubeRuntime>(
     );
     let (codes, scales) = weight.quantized_handles().unwrap();
     let cb = super::tables::codebook_for(scheme.value);
+    // RMSNorm gamma (in-kernel fold): keep the contiguous copy alive for its handle;
+    // when absent, pass the activation handle as an unread dummy (do_norm = false).
+    let gamma_c = gamma.map(into_contiguous);
+    let (gamma_handle, do_norm) = match &gamma_c {
+        Some(g) => (g.handle.clone(), true),
+        None => (activation.handle.clone(), false),
+    };
 
     macro_rules! launch {
         ($f:ty) => {
@@ -76,6 +99,9 @@ fn q_linear_inner<R: CubeRuntime>(
                 m,
                 n,
                 k,
+                gamma_handle.clone(),
+                do_norm,
+                eps,
             )
         };
     }
