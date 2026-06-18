@@ -12,6 +12,27 @@ use burn_backend::{DType, Shape, TensorMetadata};
 /// activation already in prerot space (forward-RHT applied), the weight stays
 /// rotated-and-packed, and the kernel dequantizes each weight column once.
 pub fn q_linear<R: CubeRuntime>(activation: CubeTensor<R>, weight: CubeTensor<R>) -> CubeTensor<R> {
+    // PLAIN matvec: caller supplies the activation already prerot'd (helix `rht_forward`).
+    q_linear_inner(activation, weight, cubek::quantization::qa_matmul::RhtSigns(&[]))
+}
+
+/// Like [`q_linear`] but the **forward-RHT (prerot) is applied IN-KERNEL** (bee's
+/// `matvec_prerot`): the caller passes the un-rotated activation and the panel
+/// rotates each 32-block once in registers. This avoids the separate `rht_forward`
+/// op-stream (reshape+mul+matmul+mul_scalar) that does NOT fuse into the matmul
+/// (matmul fusion is epilogue-only) — folding the rotation back where it's free.
+pub fn q_linear_prerot<R: CubeRuntime>(
+    activation: CubeTensor<R>,
+    weight: CubeTensor<R>,
+) -> CubeTensor<R> {
+    q_linear_inner(activation, weight, super::tables::rht_signs())
+}
+
+fn q_linear_inner<R: CubeRuntime>(
+    activation: CubeTensor<R>,
+    weight: CubeTensor<R>,
+    rht: cubek::quantization::qa_matmul::RhtSigns,
+) -> CubeTensor<R> {
     let scheme = match weight.dtype {
         DType::QFloat(scheme) => scheme,
         other => panic!("q_linear weight must be quantized, got {other:?}"),
@@ -40,9 +61,6 @@ pub fn q_linear<R: CubeRuntime>(activation: CubeTensor<R>, weight: CubeTensor<R>
     );
     let (codes, scales) = weight.quantized_handles().unwrap();
     let cb = super::tables::codebook_for(scheme.value);
-    // PLAIN matvec: the forward-RHT (prerot) is applied by the caller as a fusable
-    // op on the activation (helix `rht_forward`), so the kernel must NOT rotate again.
-    let rht = cubek::quantization::qa_matmul::RhtSigns(&[]);
 
     macro_rules! launch {
         ($f:ty) => {
