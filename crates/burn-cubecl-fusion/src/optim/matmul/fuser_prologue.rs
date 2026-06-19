@@ -99,10 +99,11 @@ impl<R: Runtime> MatmulPrologueFuser<R> {
     /// block's input.
     fn on_matmul(&mut self, op: &MatmulOpIr) {
         let log = std::env::var("QA_FUSE_LOG").is_ok();
+        let is_quant = matches!(op.lhs.dtype, DType::QFloat(_));
         if log {
             eprintln!(
-                "[PrologueFuser] on_matmul: accumulated_out_shape={:?} rhs_shape={:?} lhs_shape={:?} num_ops={}",
-                self.fuser.current_output_shape, op.rhs.shape, op.lhs.shape, self.fuser.num_ops,
+                "[PrologueFuser] on_matmul: QUANT={is_quant} accumulated_out_shape={:?} rhs_shape={:?} lhs_shape={:?} lhs_dtype={:?} num_ops={}",
+                self.fuser.current_output_shape, op.rhs.shape, op.lhs.shape, op.lhs.dtype, self.fuser.num_ops,
             );
         }
         // The prologue must produce exactly the rhs (the activation). If nothing
@@ -120,6 +121,12 @@ impl<R: Runtime> MatmulPrologueFuser<R> {
         if log {
             eprintln!("[PrologueFuser] ANCHOR on matmul (prologue feeds rhs)");
         }
+
+        // Credit the matmul's eliminated I/O to the score BEFORE `next_block` (which
+        // turns the rhs into a block-local crossing): the prologue fold removes the
+        // intermediate rhs read, so without this a view-only prologue (the q_linear
+        // transpose) nets 0 and the engine never picks it. See the scoring note.
+        self.fuser.register_prologue_anchor();
 
         // rhs crosses from the prologue block into the matmul.
         let [rhs] = self.fuser.next_block([&op.rhs], self.settings_write, false);

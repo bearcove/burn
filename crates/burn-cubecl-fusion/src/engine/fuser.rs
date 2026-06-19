@@ -251,6 +251,14 @@ impl TraceOperationFuser {
         self.fuser.fuser.output_unhandled(tensor)
     }
 
+    /// Credit an anchored matmul (whose rhs is produced by this fuser's prologue)
+    /// to the scoring baseline. See [`Scoring::register_prologue_anchor`]: without
+    /// this a view-only prologue (the q_linear transpose) nets a score of 0 and the
+    /// engine never selects the prologue-fused matmul.
+    pub fn register_prologue_anchor(&mut self) {
+        self.scoring.register_prologue_anchor();
+    }
+
     /// Closes the previous block and declares a new one.
     ///
     /// # Arguments

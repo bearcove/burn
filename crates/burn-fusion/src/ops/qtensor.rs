@@ -531,6 +531,15 @@ impl<B: FusionBackend> QTensorOps<Self> for Fusion<B> {
 
         let desc = MatmulOpIr::create_mixed(lhs, rhs, dtype, || client.create_empty_handle());
 
+        if std::env::var("QA_FUSE_LOG").is_ok() {
+            eprintln!(
+                "[q_matmul REG] lhs={:?}({}) rhs={:?}({}) out={:?} dtype={dtype:?}",
+                desc.lhs.shape, if lhs_quantized { "Q" } else { "F" },
+                desc.rhs.shape, if rhs_quantized { "Q" } else { "F" },
+                desc.out.shape,
+            );
+        }
+
         let out = client
             .register(
                 streams,
