@@ -6,7 +6,7 @@ use super::{
         read_input_window, ref_buffer_len, ref_len,
     },
     ir::{FuseArg, FuseBlockConfig, GlobalArgs, LayoutInfo, LocalArgs},
-    kernel::fuse_on_write,
+    kernel::{fuse_on_read, fuse_on_write},
 };
 use cubecl::{
     CubeType,
@@ -352,6 +352,176 @@ impl<E: CubePrimitive> ViewOperationsMutExpand<E, Coords1d> for FusedOutputExpan
 
 impl Vectorized for FusedOutput {}
 impl VectorizedExpand for FusedOutputExpand {
+    fn vector_size(&self) -> VectorSize {
+        self.locals.ref_vector_size
+    }
+}
+
+/// Evaluate the prologue elementwise trace at `pos` and return the value for
+/// `arg` — the read-side mirror of `fuse_on_write`. The matmul's operand read
+/// routes through this so the leading ops (the prologue) fold into the kernel.
+#[cube]
+fn fused_input_read<E: Scalar, N: Size>(
+    inputs: &GlobalArgs,
+    outputs: &mut GlobalArgs,
+    locals: &mut LocalArgs,
+    pos: usize,
+    #[comptime] arg: FuseArg,
+    #[comptime] config: FuseBlockConfig,
+) -> Vector<E, N> {
+    let values = fuse_on_read::<E, N>(
+        inputs,
+        outputs,
+        locals,
+        pos,
+        comptime! {
+            let mut sequence = Sequence::new();
+            sequence.push(arg);
+            sequence
+        },
+        &config,
+    );
+    values[0]
+}
+
+/// A matmul operand read whose value is produced by a fused elementwise
+/// **prologue** trace (rms_norm / RHT / …) evaluated in-register, instead of a
+/// raw global read. The read-side mirror of [`FusedOutput`]; used as the backing
+/// of a matmul input `View` when a prologue is present.
+#[allow(dead_code, reason = "only used in expand")]
+#[derive(CubeType)]
+pub struct FusedInput {
+    inputs: GlobalArgs,
+    outputs: GlobalArgs,
+    locals: LocalArgs,
+    arg: FuseArg,
+    #[cube(comptime)]
+    config: FuseBlockConfig,
+}
+
+#[cube]
+impl FusedInput {
+    pub fn new(
+        inputs: &GlobalArgs,
+        outputs: &mut GlobalArgs,
+        locals: &mut LocalArgs,
+        arg: FuseArg,
+        #[comptime] config: FuseBlockConfig,
+    ) -> Self {
+        FusedInput {
+            inputs: inputs.clone(),
+            outputs: outputs.clone(),
+            locals: locals.clone(),
+            arg,
+            config,
+        }
+    }
+}
+
+impl<E: CubePrimitive> ViewOperations<E, Coords1d> for FusedInput {}
+impl<E: CubePrimitive> ViewOperationsExpand<E, Coords1d> for FusedInputExpand {
+    #[allow(clippy::too_many_arguments)]
+    fn __expand_read_method(
+        &self,
+        scope: &Scope,
+        pos: NativeExpand<usize>,
+    ) -> <E as CubeType>::ExpandType {
+        ViewOperationsExpand::<E, Coords1d>::__expand_read_unchecked_method(self, scope, pos)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn __expand_read_checked_method(
+        &self,
+        scope: &Scope,
+        pos: NativeExpand<usize>,
+    ) -> <E as CubeType>::ExpandType {
+        // The prologue trace evaluates per-position; bound-checking is handled by
+        // the ref layout, so an unchecked read is correct for the in-bounds case.
+        ViewOperationsExpand::<E, Coords1d>::__expand_read_unchecked_method(self, scope, pos)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn __expand_read_masked_method(
+        &self,
+        scope: &Scope,
+        pos: NativeExpand<usize>,
+        _value: <E as CubeType>::ExpandType,
+    ) -> <E as CubeType>::ExpandType {
+        ViewOperationsExpand::<E, Coords1d>::__expand_read_unchecked_method(self, scope, pos)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn __expand_read_unchecked_method(
+        &self,
+        scope: &Scope,
+        pos: NativeExpand<usize>,
+    ) -> <E as CubeType>::ExpandType {
+        set_polyfill_typed::expand::<E, DynElem, DynSize>(scope);
+        let mut outputs = self.outputs.clone();
+        let mut locals = self.locals.clone();
+        let value = fused_input_read::expand::<E::Scalar, E::Size>(
+            scope,
+            &self.inputs,
+            &mut outputs,
+            &mut locals,
+            pos,
+            comptime![self.arg.clone()],
+            comptime![self.config.clone()],
+        );
+        E::__expand_cast_from(scope, value)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn __expand_as_linear_slice_method(
+        &self,
+        _scope: &Scope,
+        _pos: NativeExpand<usize>,
+        _end: NativeExpand<usize>,
+    ) -> &SliceExpand<E> {
+        todo!("FusedInput: linear-slice read unsupported (prologue is evaluated per element)")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn __expand_tensor_map_load_method(
+        &self,
+        _scope: &Scope,
+        _barrier: &BarrierExpand,
+        _shared_memory: &mut SliceExpand<E>,
+        _pos: NativeExpand<usize>,
+    ) {
+        panic!("Not a tensor map")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn __expand_shape_method(&self, scope: &Scope) -> NativeExpand<usize> {
+        ref_len::expand(
+            scope,
+            &self.inputs,
+            &self.outputs,
+            &self.locals,
+            &self.config,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn __expand_is_in_bounds_method(
+        &self,
+        scope: &Scope,
+        pos: NativeExpand<usize>,
+    ) -> NativeExpand<bool> {
+        let buffer_len = ref_buffer_len::expand(
+            scope,
+            &self.inputs,
+            &self.outputs,
+            &self.locals,
+            &self.config,
+        );
+        pos.__expand_lt_method(scope, &buffer_len)
+    }
+}
+
+impl Vectorized for FusedInput {}
+impl VectorizedExpand for FusedInputExpand {
     fn vector_size(&self) -> VectorSize {
         self.locals.ref_vector_size
     }
