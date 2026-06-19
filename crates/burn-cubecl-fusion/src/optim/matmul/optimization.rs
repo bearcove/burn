@@ -437,7 +437,27 @@ impl FusedMatmulLaunch<'_> {
             .required_address_type()
             .max(outputs.required_address_type());
 
-        if vector_sizes.out == 1 && (vector_sizes.lhs > 1 || vector_sizes.rhs > 1) {
+        // Upstream heuristic: a width-1 output is assumed to make fusion worthless.
+        // That conflates vectorization WIDTH with output VOLUME — for a tall
+        // quantized gemv (n=1, m large: the single-token decode / vocab head) the
+        // output is m elements, so folding the epilogue still saves an m-element
+        // global round-trip with no vectorization penalty (the gemv writes scalar
+        // either way). Keep the guard for dense GEMMs; allow the quant-MatVec case.
+        let lhs_is_quant = matches!(self.matmul.lhs, MatmulArg::Quantized { .. });
+        if std::env::var("QA_FUSE_LOG").is_ok() {
+            let guard_fires = vector_sizes.out == 1
+                && (vector_sizes.lhs > 1 || vector_sizes.rhs > 1)
+                && !lhs_is_quant;
+            eprintln!(
+                "[matmul_fused] lhs_shape={lhs_shape:?} rhs_shape={rhs_shape:?} out_shape={out_shape:?} \
+                 vec(lhs={} rhs={} out={}) quant={lhs_is_quant} guard_fires={guard_fires}",
+                vector_sizes.lhs, vector_sizes.rhs, vector_sizes.out,
+            );
+        }
+        if vector_sizes.out == 1
+            && (vector_sizes.lhs > 1 || vector_sizes.rhs > 1)
+            && !lhs_is_quant
+        {
             return Err(FusedMatmulError::InvalidInput(
                 "Output vector size of 1 removes the gain from fusion",
             ));

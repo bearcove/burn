@@ -9,6 +9,19 @@ use burn_ir::{FloatOperationIr, OperationIr};
 use burn_std::DType;
 use cubecl::Runtime;
 
+/// Short variant name for an `OperationIr`, for the QA_FUSE_LOG fusion trace.
+fn op_name(op: &OperationIr) -> String {
+    match op {
+        OperationIr::BaseFloat(o) => format!("BaseFloat({o:?})"),
+        OperationIr::NumericFloat(_, o) => format!("NumericFloat({o:?})"),
+        OperationIr::Float(_, o) => format!("Float({o:?})"),
+        OperationIr::Activation(o) => format!("Activation({o:?})"),
+        OperationIr::Custom(_) => "Custom".into(),
+        OperationIr::Module(_) => "Module".into(),
+        other => format!("{:?}", core::mem::discriminant(other)),
+    }
+}
+
 /// Fused element wise operations that are normally memory bound.
 pub struct MatmulFuser<R: Runtime> {
     fuser: TraceOperationFuser,
@@ -54,8 +67,19 @@ impl<R: Runtime> OperationFuser<CubeOptimization<R>> for MatmulFuser<R> {
             return;
         }
 
+        let log = std::env::var("QA_FUSE_LOG").is_ok();
+
         if self.matmul.is_none() {
+            if log && !matches!(operation, OperationIr::Float(_, FloatOperationIr::Matmul(_))) {
+                eprintln!("[MatmulFuser] close: first op not matmul → {}", op_name(operation));
+            }
             if let OperationIr::Float(_, FloatOperationIr::Matmul(op)) = operation {
+                if log {
+                    eprintln!(
+                        "[MatmulFuser] OPEN matmul lhs_dtype={:?} rhs_dtype={:?} out={:?}",
+                        op.lhs.dtype, op.rhs.dtype, op.out.shape
+                    );
+                }
                 // Precision shouldn't be hardcoded but I don't know how to get float precision of the backend
                 let lhs = match op.lhs.dtype {
                     DType::QFloat(scheme) => {
@@ -98,6 +122,14 @@ impl<R: Runtime> OperationFuser<CubeOptimization<R>> for MatmulFuser<R> {
         } else {
             let can_register =
                 self.fuser.can_fuse(operation) && self.fuser_fallback.can_fuse(operation);
+
+            if log {
+                eprintln!(
+                    "[MatmulFuser] epilogue {}: {}",
+                    if can_register { "+fuse" } else { "CLOSE (cant_fuse)" },
+                    op_name(operation)
+                );
+            }
 
             match can_register {
                 true => {
