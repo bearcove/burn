@@ -71,6 +71,10 @@ pub fn matmul_autotune<R: CubeRuntime>(
             // to use accelerated matmul.
             //
             // TODO: Actually implement good gemv with fused relayout.
+            // CONFIRMED (2026-06-19): for W4A16 quant MatVec the dedicated `gemv`
+            // group's GemvUnitPerpendicular errors on the codebook-packed LHS and is
+            // pruned, so accelerated (tiled, multi-kernel, slow at n=1) is the only
+            // valid candidate. The real fix is a quant-capable gemv (wire cubek's qa).
             } else if matches!(key.analysis.kind, MatmulKind::MatVec | MatmulKind::VecMat) {
                 PRIORITY_MAX
             } else {
@@ -79,7 +83,13 @@ pub fn matmul_autotune<R: CubeRuntime>(
         });
 
         let unit = TuneGroup::<MatmulAutotuneKey>::new("unit", |key| {
-            if !matches!(key.analysis.kind, MatmulKind::General)
+            if matches!(key.analysis.kind, MatmulKind::MatVec | MatmulKind::VecMat) {
+                // The unit group has correctly-oriented matvec/vecmat kernels
+                // (selector/unit.rs); benchmark them at top priority for n=1/m=1
+                // instead of letting the tiled-accelerated placeholder win by
+                // default (the "TODO: good gemv" path).
+                PRIORITY_MAX
+            } else if !matches!(key.analysis.kind, MatmulKind::General)
                 || matches!(key.analysis.scale_global, MatmulGlobalScale::Small)
             {
                 PRIORITY_HIGH

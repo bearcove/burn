@@ -50,13 +50,13 @@ impl TraceOperationFuser {
             // Debug-format the op and estimate bindings lazily: both are expensive
             // enough to skip when logging is off.
             let op_dbg = format!("{op:?}");
-            let op_short = op_dbg
-                .split_once('(')
-                .map(|(head, _)| head)
-                .unwrap_or(&op_dbg);
+            // Keep enough of the op debug to reveal the INNER variant + shapes
+            // (e.g. `BaseFloat(Reshape(... input shape [1,16,128] out [1,2048]))`)
+            // so a barrier sweep can attribute closures to the specific sub-op.
+            let op_trunc: String = op_dbg.chars().take(140).collect();
             let est = self.fuser.fuser.estimate_bindings();
             format!(
-                "[fuser] closed on {op_short} ({reason}); had {prev_num_ops} ops, est_bindings={est}/{max}"
+                "[fuser] closed on {op_trunc} ({reason}); had {prev_num_ops} ops, est_bindings={est}/{max}"
             )
         });
     }
