@@ -7,10 +7,20 @@ use crate::{
     optim::CubeOptimization,
     optim::matmul::args::MatmulArg,
 };
+use crate::engine::trace::RegisterTensor;
 use burn_fusion::{FuserStatus, OperationFuser};
-use burn_ir::{FloatOperationIr, MatmulOpIr, OperationIr};
+use burn_ir::{FloatOperationIr, MatmulOpIr, OperationIr, TensorId};
 use burn_std::DType;
 use cubecl::Runtime;
+
+#[allow(dead_code)]
+fn reg_id(t: &RegisterTensor) -> TensorId {
+    match t {
+        RegisterTensor::Normal(t, _) => t.id,
+        RegisterTensor::QuantValues(t) => t.id,
+        RegisterTensor::QuantParams(id) => *id,
+    }
+}
 
 /// Fuses the elementwise ops *before* a matmul (the prologue: rms_norm / RHT /
 /// scale) into the matmul kernel — the mirror of [`MatmulFuser`](super::fuser),
@@ -79,13 +89,26 @@ impl<R: Runtime> MatmulPrologueFuser<R> {
     /// via `fuse_on_read`), the lhs a materialized input, the out the epilogue
     /// block's input.
     fn on_matmul(&mut self, op: &MatmulOpIr) {
+        let log = std::env::var("QA_FUSE_LOG").is_ok();
+        if log {
+            eprintln!(
+                "[PrologueFuser] on_matmul: accumulated_out_shape={:?} rhs_shape={:?} lhs_shape={:?} num_ops={}",
+                self.fuser.current_output_shape, op.rhs.shape, op.lhs.shape, self.fuser.num_ops,
+            );
+        }
         // The prologue must produce exactly the rhs (the activation). If nothing
         // was accumulated, or it produced a different shape, this isn't ours —
         // let the epilogue fuser / elementwise path take it.
         if self.fuser.current_output_shape != op.rhs.shape {
+            if log {
+                eprintln!("[PrologueFuser] close: accumulated shape != rhs (no prologue produces rhs)");
+            }
             self.fuser.close();
             self.fuser_fallback.close();
             return;
+        }
+        if log {
+            eprintln!("[PrologueFuser] ANCHOR on matmul (prologue feeds rhs)");
         }
 
         // rhs crosses from the prologue block into the matmul.
@@ -145,6 +168,21 @@ impl<R: Runtime> MatmulPrologueFuser<R> {
 
 impl<R: Runtime> OperationFuser<CubeOptimization<R>> for MatmulPrologueFuser<R> {
     fn fuse(&mut self, operation: &OperationIr) {
+        if std::env::var("QA_FUSE_LOG").is_ok() {
+            let kind = match operation {
+                OperationIr::Float(_, FloatOperationIr::Matmul(_)) => "MATMUL",
+                OperationIr::NumericFloat(..) => "NumericFloat",
+                OperationIr::Float(..) => "Float",
+                OperationIr::BaseFloat(..) => "BaseFloat",
+                _ => "other",
+            };
+            eprintln!(
+                "[PrologueFuser] fuse op={kind} anchored={} status={:?} cur_shape={:?}",
+                self.matmul.is_some(),
+                self.fuser.status(),
+                self.fuser.current_output_shape,
+            );
+        }
         if let FuserStatus::Closed = self.fuser.status() {
             return;
         }
@@ -163,8 +201,31 @@ impl<R: Runtime> OperationFuser<CubeOptimization<R>> for MatmulPrologueFuser<R> 
     }
 
     fn finish(&mut self) -> CubeOptimization<R> {
+        if std::env::var("QA_FUSE_LOG").is_ok() {
+            eprintln!(
+                "[PrologueFuser] finish: anchored={} fuser.len={}",
+                self.matmul.is_some(),
+                self.fuser.len()
+            );
+        }
         let client = R::client(&self.device);
         let trace = self.fuser.finish();
+        if std::env::var("QA_FUSE_LOG").is_ok() {
+            eprintln!(
+                "[PrologueFuser] trace blocks={} inputs={:?} outputs={:?}",
+                trace.blocks.len(),
+                trace.resources.inputs.iter().map(reg_id).collect::<Vec<_>>(),
+                trace.resources.outputs.iter().map(reg_id).collect::<Vec<_>>(),
+            );
+            for (i, b) in trace.blocks.iter().enumerate() {
+                eprintln!(
+                    "[PrologueFuser]   block{i}: ops={} reads={:?} writes={:?}",
+                    b.ops.len(),
+                    b.reads.keys().collect::<Vec<_>>(),
+                    b.writes.keys().collect::<Vec<_>>(),
+                );
+            }
+        }
         let trace_fallback = self.fuser_fallback.finish();
 
         let matmul = MatmulOptimization::new(
@@ -192,7 +253,17 @@ impl<R: Runtime> OperationFuser<CubeOptimization<R>> for MatmulPrologueFuser<R> 
     }
 
     fn properties(&self) -> burn_fusion::FuserProperties {
-        self.fuser.properties()
+        let p = self.fuser.properties();
+        if std::env::var("QA_FUSE_LOG").is_ok() {
+            eprintln!(
+                "[PrologueFuser] properties: anchored={} ready={} score={} status={:?}",
+                self.matmul.is_some(),
+                p.ready,
+                p.score,
+                self.fuser.status(),
+            );
+        }
+        p
     }
 
     fn len(&self) -> usize {

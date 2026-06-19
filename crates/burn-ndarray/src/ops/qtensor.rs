@@ -61,6 +61,7 @@ impl QTensorOps<Self> for NdArray {
                         value:
                             QuantValue::Q4F
                             | QuantValue::Q4S
+                            | QuantValue::Q6F
                             | QuantValue::Q2F
                             | QuantValue::Q2S
                             | QuantValue::E2M1
@@ -68,6 +69,8 @@ impl QTensorOps<Self> for NdArray {
                             | QuantValue::E5M2,
                         ..
                     } => unimplemented!("from_data not supported for scheme {scheme:?}"),
+                    // Codebook / other GPU-only modes aren't supported on ndarray.
+                    _ => unimplemented!("from_data not supported for scheme {scheme:?}"),
                 }
             }
             _ => panic!(

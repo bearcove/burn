@@ -101,7 +101,13 @@ impl<R: Runtime> MatmulOptimizationTuneArg<R> {
         let launch = FusedMatmulLaunch::new(&self.info.matmul, selector);
         let launcher = FuseTraceLauncher::new(&self.info.trace, &launch);
 
-        launcher.launch(&self.info.client, &self.info.device, context)
+        let result = launcher.launch(&self.info.client, &self.info.device, context);
+        if std::env::var("QA_FUSE_LOG").is_ok()
+            && let Err(e) = &result
+        {
+            eprintln!("[execute_fused] selector={selector:?} ERR: {e:?}");
+        }
+        result
     }
 
     pub fn execute_fallback(&self, context: &mut Context<CubeFusionHandle<R>>) -> TuneOutput<R> {
@@ -340,20 +346,22 @@ impl<'a, R: Runtime> Vectorization<R> for FusedMatmulLaunch<'a> {
             }
         }
 
-        let (lhs_id_global, lhs_strides) = tensor_lhs.unwrap();
-        let (rhs_id_global, rhs_strides) = tensor_rhs.unwrap();
-
         let mut axis = VectorizationAxis::default();
 
-        if let MatrixBatchLayout::MildlyPermuted { transposed, .. } =
-            matrix_batch_layout(lhs_strides, self.matmul.lhs.scheme())
+        // A prologue-fused operand is a computed intermediate with no handle in
+        // the plan (tensor_* is None); it's contiguous, so there's no transposed
+        // read to account for — skip it.
+        if let Some((lhs_id_global, lhs_strides)) = tensor_lhs
+            && let MatrixBatchLayout::MildlyPermuted { transposed, .. } =
+                matrix_batch_layout(lhs_strides, self.matmul.lhs.scheme())
             && transposed
         {
             axis.insert(lhs_id_global, lhs_strides.len() - 2);
         }
 
-        if let MatrixBatchLayout::MildlyPermuted { transposed, .. } =
-            matrix_batch_layout(rhs_strides, self.matmul.rhs.scheme())
+        if let Some((rhs_id_global, rhs_strides)) = tensor_rhs
+            && let MatrixBatchLayout::MildlyPermuted { transposed, .. } =
+                matrix_batch_layout(rhs_strides, self.matmul.rhs.scheme())
             && transposed
         {
             axis.insert(rhs_id_global, rhs_strides.len() - 2);

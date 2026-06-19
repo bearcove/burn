@@ -145,6 +145,10 @@ impl<R: CubeRuntime> FusionRuntime for FusionCubeRuntime<R> {
         vec![
             Box::new(ElementWiseFuser::new(device.clone())),
             Box::new(MatmulFuser::new(device.clone())),
+            // WIP: prologue fusion. Currently the 2-block trace mis-registers the
+            // prologue op's output as a materialized input (panics the launch on a
+            // prologue+matmul, incl. the real decode). To disable while debugging,
+            // comment out this line. See notes/matmul-prologue-fusion-design.md.
             Box::new(MatmulPrologueFuser::new(device.clone())),
             Box::new(ReduceFuser::new(device.clone(), ReduceSettings::Always)),
             Box::new(ReduceBroadcastedFuser::new(device.clone())),

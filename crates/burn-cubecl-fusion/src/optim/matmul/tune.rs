@@ -7,6 +7,7 @@ use crate::{
 };
 use burn_backend::cubecl::dtype_to_storage_type;
 use burn_fusion::stream::Context;
+use burn_std::tensor::contiguous_strides;
 use cubecl::{
     AutotuneKey, CubeTuneId, Runtime,
     std::tensor::MatrixBatchLayout,
@@ -271,16 +272,16 @@ pub(crate) fn create_key<R: Runtime>(
     let rhs = tensors.get(&opt.info.matmul.op.rhs.id).unwrap();
     let out = tensors.get(&opt.info.matmul.op.out.id).unwrap();
 
-    let lhs_strides = handles
-        .get_handle_ref(&lhs.id)
-        .expect("lhs handle")
-        .strides
-        .clone();
-    let rhs_strides = handles
-        .get_handle_ref(&rhs.id)
-        .expect("rhs handle")
-        .strides
-        .clone();
+    // A prologue-fused operand is a computed intermediate with no materialized
+    // handle; its logical layout is contiguous (row-major). Fall back to that.
+    let lhs_strides = match handles.get_handle_ref(&lhs.id) {
+        Some(h) => h.strides.clone(),
+        None => contiguous_strides(&lhs.shape),
+    };
+    let rhs_strides = match handles.get_handle_ref(&rhs.id) {
+        Some(h) => h.strides.clone(),
+        None => contiguous_strides(&rhs.shape),
+    };
 
     let key = MatmulAutotuneKey::generate(
         &opt.info.client,

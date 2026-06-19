@@ -710,6 +710,7 @@ impl NdArrayQTensor {
                     | QuantValue::E5M2
                     | QuantValue::Q4F
                     | QuantValue::Q4S
+                    | QuantValue::Q6F
                     | QuantValue::E2M1
                     | QuantValue::Q2F
                     | QuantValue::Q2S,
@@ -728,6 +729,7 @@ impl NdArrayQTensor {
                     | QuantValue::E5M2
                     | QuantValue::Q4F
                     | QuantValue::Q4S
+                    | QuantValue::Q6F
                     | QuantValue::E2M1
                     | QuantValue::Q2F
                     | QuantValue::Q2S,
@@ -739,6 +741,8 @@ impl NdArrayQTensor {
                     .collect(),
                 block_size,
             ),
+            // Codebook / other GPU-only modes aren't supported on ndarray.
+            _ => unimplemented!("ndarray strategy: unsupported quant scheme {:?}", self.scheme),
         }
     }
 }

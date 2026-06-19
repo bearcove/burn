@@ -28,6 +28,24 @@ impl<'a, R: Runtime> InputPlanner<'a, R> {
     }
 
     pub fn run(self, context: &mut Context<CubeFusionHandle<R>>, plan: &mut LaunchPlan<'a, R>) {
+        if std::env::var("QA_FUSE_LOG").is_ok() {
+            let ins: Vec<_> = self
+                .resources
+                .inputs
+                .iter()
+                .map(|t| match t {
+                    RegisterTensor::Normal(t, _) => (t.id, "N"),
+                    RegisterTensor::QuantValues(t) => (t.id, "Q"),
+                    RegisterTensor::QuantParams(id) => (*id, "P"),
+                })
+                .collect();
+            let outs: Vec<_> = self.resources.outputs.iter().map(|t| match t {
+                RegisterTensor::Normal(t, _) => t.id,
+                RegisterTensor::QuantValues(t) => t.id,
+                RegisterTensor::QuantParams(id) => *id,
+            }).collect();
+            eprintln!("[InputPlanner] blocks={} inputs={ins:?} outputs={outs:?}", self.blocks.len());
+        }
         for (pos, input) in self.resources.inputs.iter().enumerate() {
             match input {
                 RegisterTensor::Normal(tensor_relative, precision) => {
