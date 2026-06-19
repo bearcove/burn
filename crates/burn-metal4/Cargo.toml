@@ -17,6 +17,12 @@ workspace = true
 default = ["std", "fusion", "autotune", "burn-cubecl/default", "cubecl/default"]
 doc = ["burn-cubecl/doc"]
 std = ["burn-cubecl/std", "cubecl/std"]
+tracing = [
+    "burn-backend/tracing",
+    "burn-cubecl/tracing",
+    "burn-fusion?/tracing",
+    "cubecl/tracing",
+]
 fusion = ["burn-fusion", "burn-cubecl/fusion"]
 autotune = ["burn-cubecl/autotune"]
 autotune-checks = ["burn-cubecl/autotune-checks"]
