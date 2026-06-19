@@ -2,7 +2,7 @@ use crate::engine::codegen::{
     io::ref_vector_size,
     ir::{FuseArg, FuseBlockConfig, FuseType, GlobalArgs, LocalArgs, multi_block_variables_init},
     kernel::init_locals,
-    view::{FusedOutput, GlobalInput, GlobalInputExpand},
+    view::{FusedInput, FusedOutput, GlobalInput, GlobalInputExpand},
 };
 use cubecl::{
     intrinsic,
@@ -49,6 +49,11 @@ pub struct FusedMatmulInput {
     c: Option<MatmulArg>,
     #[cube(comptime)]
     out: FuseArg,
+    /// Prologue block config: when present, the rhs operand is produced by this
+    /// fused elementwise trace (read via `fuse_on_read` / `FusedInput`) instead of
+    /// a raw global read. `None` → today's epilogue-only behavior.
+    #[cube(comptime)]
+    config_read: Option<FuseBlockConfig>,
 }
 
 #[cube]
@@ -69,6 +74,17 @@ impl MatmulArgs for FusedMatmulArgs {
         multi_block_variables_init(&inputs.config, &mut outputs.variables);
 
         let mut locals = init_locals(&inputs.global, outputs, &inputs.config);
+
+        // Prologue (read) block: when present, build its locals so the rhs read
+        // can evaluate the leading elementwise trace via `fuse_on_read`.
+        let mut locals_read = match comptime![inputs.config_read.clone()] {
+            Some(config_read) => {
+                multi_block_variables_init(&config_read, &mut outputs.variables);
+                init_locals(&inputs.global, outputs, &config_read)
+            }
+            None => locals.clone(),
+        };
+
         let rank = comptime![inputs.config.rank];
 
         let mut batch_shape = Sequence::new();
@@ -107,12 +123,14 @@ impl MatmulArgs for FusedMatmulArgs {
             inputs,
             outputs,
             &mut locals,
+            &mut locals_read,
             batch_lhs,
             batch_rhs,
             batch_acc,
             VirtualLayout::new::<BatchLayout>(batch_out),
             batch_shape,
             &inputs.config,
+            comptime![inputs.config_read.clone()],
             lhs_layout_config,
             rhs_layout_config,
             out_layout_config,
@@ -142,14 +160,28 @@ impl MatmulArgs for FusedMatmulArgs {
     fn view_rhs<Lhs: CubePrimitive, Rhs: CubePrimitive, EO: CubePrimitive>(
         state: &Self::State<Lhs, Rhs, EO>,
     ) -> View<'_, Rhs, BatchedCoords> {
-        global_view(
-            &state.inputs,
-            &state.locals,
-            &state.batch_shape,
-            comptime![state.b.clone()],
-            comptime![state.config.clone()],
-            comptime![state.rhs_layout_config],
-        )
+        // When a prologue block is present the rhs is produced by a fused
+        // elementwise trace — read it via `FusedInput`/`fuse_on_read`. Otherwise
+        // a raw global read (today's behavior).
+        match comptime![state.config_read.clone()] {
+            Some(config_read) => global_view_fused_read(
+                &state.inputs,
+                &state.outputs,
+                &state.locals_read,
+                &state.batch_shape,
+                comptime![state.b.clone()],
+                comptime![config_read],
+                comptime![state.rhs_layout_config],
+            ),
+            None => global_view(
+                &state.inputs,
+                &state.locals,
+                &state.batch_shape,
+                comptime![state.b.clone()],
+                comptime![state.config.clone()],
+                comptime![state.rhs_layout_config],
+            ),
+        }
     }
 
     fn batch_rhs<Lhs: CubePrimitive, Rhs: CubePrimitive, EO: CubePrimitive>(
@@ -341,6 +373,56 @@ fn global_view<E: CubePrimitive>(
     }
 }
 
+/// Like [`global_view`] but the operand is produced by a fused elementwise
+/// **prologue** trace: the read routes through [`FusedInput`] / `fuse_on_read`
+/// (evaluate the leading ops in-register) instead of a raw global read. Only the
+/// normal (dense) case — the prologue-fused operand is the activation, not the
+/// packed quant weight.
+#[cube]
+fn global_view_fused_read<E: CubePrimitive>(
+    inputs: &GlobalArgs,
+    outputs: &GlobalArgs,
+    locals_read: &LocalArgs,
+    _batch_shape: &Sequence<FastDivmod<u32>>,
+    #[comptime] arg: MatmulArg,
+    #[comptime] config_read: FuseBlockConfig,
+    #[comptime] layout_config: GlobalLayoutConfig,
+) -> View<'static, E, BatchedCoords> {
+    let rank = comptime![config_read.rank];
+    let data = comptime![arg.data().clone()];
+    let data_tensor = match comptime![data.clone()] {
+        FuseArg::Input(pos, ..) => inputs.tensors.index(pos),
+        _ => panic!("Prologue-fused input must be a concrete normal input"),
+    };
+
+    let shape_row = data_tensor.tensor.shape(rank - 2) as u32;
+    let shape_col = data_tensor.tensor.shape(rank - 1) as u32;
+    let shape = (shape_row, shape_col);
+
+    let batch_layout = VirtualLayout::new::<NoopLayout>(NoopLayout::new());
+    let data_layout = global_layout(
+        inputs,
+        shape,
+        batch_layout,
+        comptime![data.clone()],
+        comptime![config_read.clone()],
+        data_tensor.tensor.vector_size(),
+        layout_config,
+        1u32,
+    );
+
+    let mut outputs = outputs.clone();
+    let mut locals = locals_read.clone();
+    let buf = FusedInput::new(
+        inputs,
+        &mut outputs,
+        &mut locals,
+        comptime![data],
+        comptime![config_read],
+    );
+    View::new::<FusedInput, Coords1d>(buf, data_layout)
+}
+
 #[cube]
 fn input_batch_layout(
     inputs: &GlobalArgs,
@@ -474,12 +556,15 @@ pub struct FusedMatmulState {
     inputs: GlobalArgs,
     outputs: GlobalArgs,
     locals: LocalArgs,
+    locals_read: LocalArgs,
     a_batch: VirtualLayout<Coords1d, Coords1d>,
     b_batch: VirtualLayout<Coords1d, Coords1d>,
     c_batch: ComptimeOption<VirtualLayout<Coords1d, Coords1d>>,
     out_batch: VirtualLayout<Coords1d, Coords1d>,
     #[cube(comptime)]
     config: FuseBlockConfig,
+    #[cube(comptime)]
+    config_read: Option<FuseBlockConfig>,
     #[cube(comptime)]
     a: MatmulArg,
     #[cube(comptime)]
@@ -504,12 +589,14 @@ impl FusedMatmulState {
         inputs: &FusedMatmulInput,
         outputs: &mut GlobalArgs,
         locals: &mut LocalArgs,
+        locals_read: &mut LocalArgs,
         a_batch: VirtualLayout<usize, usize>,
         b_batch: VirtualLayout<usize, usize>,
         c_batch: ComptimeOption<VirtualLayout<usize, usize>>,
         out_batch: VirtualLayout<usize, usize>,
         batch_shape: Sequence<FastDivmod<u32>>,
         #[comptime] config: &FuseBlockConfig,
+        #[comptime] config_read: Option<FuseBlockConfig>,
         #[comptime] lhs_layout_config: GlobalLayoutConfig,
         #[comptime] rhs_layout_config: GlobalLayoutConfig,
         #[comptime] out_layout_config: GlobalLayoutConfig,
@@ -518,7 +605,9 @@ impl FusedMatmulState {
             inputs: inputs.global.clone(),
             outputs: outputs.clone(),
             config: comptime![config.clone()],
+            config_read: comptime![config_read],
             locals: locals.clone(),
+            locals_read: locals_read.clone(),
             a_batch,
             b_batch,
             c_batch,
