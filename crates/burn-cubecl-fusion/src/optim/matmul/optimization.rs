@@ -64,10 +64,18 @@ pub struct MatmulOptimizationTuneArg<R: Runtime> {
 
 pub(crate) struct MatmulOptimizationInfo<R: Runtime> {
     trace: FuseTrace,
+    /// Epilogue (write-side) fallback: the elementwise ops after the matmul, run
+    /// as a standalone kernel when the fused path can't.
     trace_fallback: FuseTrace,
+    /// Prologue (read-side) fallback: the elementwise ops that produce the matmul's
+    /// rhs, run before the matmul in the fallback. `None` for epilogue-only fusion.
+    trace_read_fallback: Option<FuseTrace>,
     pub(crate) client: ComputeClient<R>,
     pub(crate) device: R::Device,
     pub(crate) len: usize,
+    /// Number of ops fused as the read/prologue block — the fallback matmul sits
+    /// after them (index `len_read`). 0 for epilogue-only fusion.
+    pub(crate) len_read: usize,
     pub(crate) matmul: FusedMatmul,
 }
 
@@ -76,8 +84,10 @@ pub(crate) struct MatmulOptimizationInfo<R: Runtime> {
 pub struct MatmulOptimizationState {
     trace: FuseTrace,
     trace_fallback: FuseTrace,
+    trace_read_fallback: Option<FuseTrace>,
     matmul: FusedMatmul,
     len: usize,
+    len_read: usize,
 }
 
 impl<R: Runtime> MatmulOptimizationInfo<R> {
@@ -111,14 +121,25 @@ impl<R: Runtime> MatmulOptimizationTuneArg<R> {
     }
 
     pub fn execute_fallback(&self, context: &mut Context<CubeFusionHandle<R>>) -> TuneOutput<R> {
-        self.fallback.run(context);
-
-        #[cfg(feature = "autotune-checks")]
-        let mut output = TuneOutput::Checked {
-            handles: Default::default(),
+        // Prologue (read) fallback first, so the matmul's rhs is materialized
+        // before the fallback matmul reads it. `None` for epilogue-only fusion.
+        #[allow(unused_mut)]
+        let mut output = match &self.info.trace_read_fallback {
+            Some(trace_read) => {
+                let launcher = FuseTraceLauncher::new(trace_read, &ElemwiseRunner);
+                launcher
+                    .launch(&self.info.client, &self.info.device, context)
+                    .unwrap()
+            }
+            #[cfg(feature = "autotune-checks")]
+            None => TuneOutput::Checked {
+                handles: Default::default(),
+            },
+            #[cfg(not(feature = "autotune-checks"))]
+            None => TuneOutput::UnChecked(core::marker::PhantomData),
         };
-        #[cfg(not(feature = "autotune-checks"))]
-        let output = TuneOutput::UnChecked(core::marker::PhantomData);
+
+        self.fallback.run(context);
 
         #[cfg(feature = "autotune-checks")]
         if let TuneOutput::Checked { handles } = &mut output {
@@ -143,20 +164,25 @@ impl<R: Runtime> MatmulOptimizationTuneArg<R> {
 }
 
 impl<R: Runtime> MatmulOptimization<R> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         trace: FuseTrace,
         trace_fallback: FuseTrace,
+        trace_read_fallback: Option<FuseTrace>,
         client: ComputeClient<R>,
         device: R::Device,
         len: usize,
+        len_read: usize,
         matmul: FusedMatmul,
     ) -> Self {
         let info = MatmulOptimizationInfo {
             trace,
             trace_fallback,
+            trace_read_fallback,
             client,
             device,
             len,
+            len_read,
             matmul,
         };
 
@@ -170,8 +196,9 @@ impl<R: Runtime> MatmulOptimization<R> {
         context: &mut Context<CubeFusionHandle<R>>,
         fallback: impl FnOnce(usize) -> Box<dyn FallbackOperation<R>>,
     ) {
-        // The index of the fallback matmul is always 0.
-        let fallback = fallback(0);
+        // The fallback matmul sits after the prologue (read) ops; `len_read` is 0
+        // for epilogue-only fusion.
+        let fallback = fallback(self.info.len_read);
         let arg = MatmulOptimizationTuneArg {
             info: self.info.clone(),
             fallback,
@@ -199,7 +226,9 @@ impl<R: Runtime> MatmulOptimization<R> {
         let info = MatmulOptimizationInfo {
             trace: state.trace,
             trace_fallback: state.trace_fallback,
+            trace_read_fallback: state.trace_read_fallback,
             len: state.len,
+            len_read: state.len_read,
             client: R::client(device),
             device: device.clone(),
             matmul: state.matmul.clone(),
@@ -215,8 +244,10 @@ impl<R: Runtime> MatmulOptimization<R> {
         MatmulOptimizationState {
             trace: self.info.trace.clone(),
             trace_fallback: self.info.trace_fallback.clone(),
+            trace_read_fallback: self.info.trace_read_fallback.clone(),
             matmul: self.info.matmul.clone(),
             len: self.info.len,
+            len_read: self.info.len_read,
         }
     }
 }

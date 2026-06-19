@@ -34,7 +34,11 @@ pub struct MatmulPrologueFuser<R: Runtime> {
     /// The 2-block trace: block 0 accumulates the prologue (read), block 1 the
     /// epilogue (write). `next_block` (on anchor) transitions between them.
     fuser: TraceOperationFuser,
-    fuser_fallback: TraceOperationFuser,
+    /// Fallback (unfused) when the fused path can't run: the prologue elementwise
+    /// ops run as their own kernel (materializing the rhs)…
+    fuser_read_fallback: TraceOperationFuser,
+    /// …then the matmul (provided as a fallback op), then the epilogue ops.
+    fuser_write_fallback: TraceOperationFuser,
     settings_write: FuseSettings,
     device: R::Device,
     matmul: Option<FusedMatmul>,
@@ -44,7 +48,8 @@ impl<R: Runtime> Clone for MatmulPrologueFuser<R> {
     fn clone(&self) -> Self {
         Self {
             fuser: self.fuser.clone(),
-            fuser_fallback: self.fuser_fallback.clone(),
+            fuser_read_fallback: self.fuser_read_fallback.clone(),
+            fuser_write_fallback: self.fuser_write_fallback.clone(),
             settings_write: self.settings_write,
             device: self.device.clone(),
             matmul: self.matmul.clone(),
@@ -77,7 +82,8 @@ impl<R: Runtime> MatmulPrologueFuser<R> {
 
         Self {
             fuser: TraceOperationFuser::new(max_bindings, settings_read),
-            fuser_fallback: TraceOperationFuser::new(max_bindings, settings_fallback),
+            fuser_read_fallback: TraceOperationFuser::new(max_bindings, settings_fallback),
+            fuser_write_fallback: TraceOperationFuser::new(max_bindings, settings_fallback),
             settings_write,
             device,
             matmul: None,
@@ -104,7 +110,8 @@ impl<R: Runtime> MatmulPrologueFuser<R> {
                 eprintln!("[PrologueFuser] close: accumulated shape != rhs (no prologue produces rhs)");
             }
             self.fuser.close();
-            self.fuser_fallback.close();
+            self.fuser_read_fallback.close();
+            self.fuser_write_fallback.close();
             return;
         }
         if log {
@@ -139,29 +146,38 @@ impl<R: Runtime> MatmulPrologueFuser<R> {
             Default::default(),
         ));
 
-        self.fuser_fallback.close();
+        // The prologue (read) block is complete; its fallback materializes the rhs.
+        // The write fallback stays open to collect the epilogue.
+        self.fuser_read_fallback.close();
     }
 
     fn on_elemwise_read(&mut self, operation: &OperationIr) {
         let can_register =
-            self.fuser.can_fuse(operation) && self.fuser_fallback.can_fuse(operation);
+            self.fuser.can_fuse(operation) && self.fuser_read_fallback.can_fuse(operation);
         match can_register {
             true => {
                 self.fuser.fuse(operation);
-                self.fuser_fallback.fuse(operation);
+                self.fuser_read_fallback.fuse(operation);
             }
             false => {
                 self.fuser.close();
-                self.fuser_fallback.close();
+                self.fuser_read_fallback.close();
             }
         };
     }
 
     fn on_elemwise_write(&mut self, operation: &OperationIr) {
-        let can_register = self.fuser.can_fuse(operation);
+        let can_register =
+            self.fuser.can_fuse(operation) && self.fuser_write_fallback.can_fuse(operation);
         match can_register {
-            true => self.fuser.fuse(operation),
-            false => self.fuser.close(),
+            true => {
+                self.fuser.fuse(operation);
+                self.fuser_write_fallback.fuse(operation);
+            }
+            false => {
+                self.fuser.close();
+                self.fuser_write_fallback.close();
+            }
         };
     }
 }
@@ -226,14 +242,20 @@ impl<R: Runtime> OperationFuser<CubeOptimization<R>> for MatmulPrologueFuser<R> 
                 );
             }
         }
-        let trace_fallback = self.fuser_fallback.finish();
+        // Read (prologue) fallback materializes the rhs; write fallback runs the
+        // epilogue. `len_read` = prologue op count (the fallback matmul sits after).
+        let len_read = self.fuser_read_fallback.len();
+        let trace_read_fallback = self.fuser_read_fallback.finish();
+        let trace_write_fallback = self.fuser_write_fallback.finish();
 
         let matmul = MatmulOptimization::new(
             trace,
-            trace_fallback,
+            trace_write_fallback,
+            Some(trace_read_fallback),
             client,
             self.device.clone(),
             self.len(),
+            len_read,
             self.matmul.as_ref().unwrap().clone(),
         );
 
@@ -242,7 +264,8 @@ impl<R: Runtime> OperationFuser<CubeOptimization<R>> for MatmulPrologueFuser<R> 
 
     fn reset(&mut self) {
         self.fuser.reset();
-        self.fuser_fallback.reset();
+        self.fuser_read_fallback.reset();
+        self.fuser_write_fallback.reset();
         self.matmul = None;
     }
 

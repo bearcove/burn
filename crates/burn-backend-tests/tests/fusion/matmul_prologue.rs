@@ -42,6 +42,19 @@ fn prologue_and_epilogue_around_matmul() {
                     .map(|b| (b.fuser_name(), b.operations.len()))
             })
             .collect();
-        panic!("PROLOGUE GATE1 blocks={summary:?}\n\n{reports:#?}");
+        // The whole `(w @ (x*2)) * 3` must collapse into ONE fused matmul kernel:
+        // a "Matmul"-fused block containing the prologue mul, the matmul, and the
+        // epilogue mul. (The epilogue-only MatmulFuser can't produce this — the
+        // matmul doesn't lead the window — so a multi-op Matmul block with a
+        // leading prologue op can only come from MatmulPrologueFuser.)
+        let matmul_block = reports
+            .iter()
+            .flat_map(|r| r.blocks.iter())
+            .find(|b| b.fuser_name() == Some("Matmul"))
+            .unwrap_or_else(|| panic!("no Matmul-fused block; got {summary:?}\n\n{reports:#?}"));
+        assert!(
+            matmul_block.operations.len() >= 3,
+            "expected prologue+matmul+epilogue fused into one Matmul kernel; got {summary:?}\n\n{reports:#?}"
+        );
     });
 }

@@ -152,9 +152,11 @@ impl<R: Runtime> OperationFuser<CubeOptimization<R>> for MatmulFuser<R> {
         let matmul = MatmulOptimization::new(
             trace,
             trace_fallback,
+            None, // epilogue-only: no prologue (read) fallback
             client,
             self.device.clone(),
             self.len(),
+            0, // len_read
             self.matmul.as_ref().unwrap().clone(),
         );
 
