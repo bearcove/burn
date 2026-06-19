@@ -379,7 +379,14 @@ impl<R: Runtime> TraceRunner<R> for FusedMatmulLaunch<'_> {
             out: self.matmul.out.precision().into_storage_type(),
         };
         let dtypes = MatmulElems::from_globals(&global_elems);
-        self.matmul_fused(client, inputs, outputs, &configs[0], dtypes)
+        // A prologue-fused trace has two blocks: [0] = prologue (read, feeds the
+        // rhs via fuse_on_read), last = epilogue (write, holds the output ref).
+        // Epilogue-only (today): a single block, no read config.
+        let (config_read, config) = match configs.len() {
+            0 | 1 => (None, &configs[0]),
+            n => (Some(&configs[0]), &configs[n - 1]),
+        };
+        self.matmul_fused(client, inputs, outputs, config, config_read, dtypes)
     }
 }
 
@@ -398,15 +405,26 @@ impl FusedMatmulLaunch<'_> {
         inputs: GlobalArgsLaunch<R>,
         outputs: GlobalArgsLaunch<R>,
         config: &'a FuseBlockConfig,
+        config_read: Option<&'a FuseBlockConfig>,
         dtypes: MatmulElems,
     ) -> Result<(), FusedMatmulError> {
         let lhs_shape = inputs.shape(self.matmul.lhs.data());
-        let rhs_shape = inputs.shape(self.matmul.rhs.data());
         let out_shape = outputs.shape_ref(&config.ref_layout, config.rank);
 
         let lhs_strides = inputs.strides(self.matmul.lhs.data());
         let lhs_scheme = self.matmul.lhs.scheme();
-        let rhs_strides = inputs.strides(self.matmul.rhs.data());
+        // The prologue-fused rhs is the output of the read block, not a raw
+        // global tensor, so its shape/strides come from that block's ref layout.
+        let (rhs_shape, rhs_strides) = match config_read {
+            Some(cr) => (
+                inputs.shape_ref(&cr.ref_layout, cr.rank),
+                inputs.strides_ref(&cr.ref_layout, cr.rank),
+            ),
+            None => (
+                inputs.shape(self.matmul.rhs.data()),
+                inputs.strides(self.matmul.rhs.data()),
+            ),
+        };
         let rhs_scheme = self.matmul.rhs.scheme();
 
         if matrix_batch_layout(&lhs_strides, lhs_scheme) == MatrixBatchLayout::HighlyPermuted {
@@ -422,7 +440,11 @@ impl FusedMatmulLaunch<'_> {
 
         let mut vector_sizes = MatmulVectorSizes {
             lhs: inputs.vector_size(self.matmul.lhs.data()),
-            rhs: inputs.vector_size(self.matmul.rhs.data()),
+            // Prologue-fused rhs is evaluated element-wise via fuse_on_read.
+            rhs: match config_read {
+                Some(_) => 1,
+                None => inputs.vector_size(self.matmul.rhs.data()),
+            },
             out: match &config.ref_layout {
                 RefLayout::Concrete(arg) => match arg {
                     FuseArg::Input(..) => inputs.vector_size(arg),
@@ -506,7 +528,7 @@ impl FusedMatmulLaunch<'_> {
                         self.matmul.rhs.clone(),
                         None,
                         self.matmul.out.clone(),
-                        None,
+                        config_read.cloned(),
                     ),
                     outputs,
                     problem,
@@ -539,7 +561,7 @@ impl FusedMatmulLaunch<'_> {
                         self.matmul.rhs.clone(),
                         None,
                         self.matmul.out.clone(),
-                        None,
+                        config_read.cloned(),
                     ),
                     outputs,
                     problem,
@@ -576,7 +598,7 @@ impl FusedMatmulLaunch<'_> {
                         self.matmul.rhs.clone(),
                         None,
                         self.matmul.out.clone(),
-                        None,
+                        config_read.cloned(),
                     ),
                     outputs,
                     problem,
@@ -598,7 +620,7 @@ impl FusedMatmulLaunch<'_> {
                         self.matmul.rhs.clone(),
                         None,
                         self.matmul.out.clone(),
-                        None,
+                        config_read.cloned(),
                     ),
                     outputs,
                     problem,
@@ -620,7 +642,7 @@ impl FusedMatmulLaunch<'_> {
                         self.matmul.rhs.clone(),
                         None,
                         self.matmul.out.clone(),
-                        None,
+                        config_read.cloned(),
                     ),
                     outputs,
                     problem,
@@ -642,7 +664,7 @@ impl FusedMatmulLaunch<'_> {
                         self.matmul.rhs.clone(),
                         None,
                         self.matmul.out.clone(),
-                        None,
+                        config_read.cloned(),
                     ),
                     outputs,
                     problem,
@@ -664,7 +686,7 @@ impl FusedMatmulLaunch<'_> {
                         self.matmul.rhs.clone(),
                         None,
                         self.matmul.out.clone(),
-                        None,
+                        config_read.cloned(),
                     ),
                     outputs,
                     problem,
@@ -686,7 +708,7 @@ impl FusedMatmulLaunch<'_> {
                         self.matmul.rhs.clone(),
                         None,
                         self.matmul.out.clone(),
-                        None,
+                        config_read.cloned(),
                     ),
                     outputs,
                     problem,
@@ -708,7 +730,7 @@ impl FusedMatmulLaunch<'_> {
                         self.matmul.rhs.clone(),
                         None,
                         self.matmul.out.clone(),
-                        None,
+                        config_read.cloned(),
                     ),
                     outputs,
                     problem,
@@ -730,7 +752,7 @@ impl FusedMatmulLaunch<'_> {
                         self.matmul.rhs.clone(),
                         None,
                         self.matmul.out.clone(),
-                        None,
+                        config_read.cloned(),
                     ),
                     outputs,
                     problem,

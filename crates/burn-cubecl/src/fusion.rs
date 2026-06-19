@@ -8,7 +8,7 @@ use burn_cubecl_fusion::{
     optim::{
         CubeOptimization, CubeOptimizationState,
         elemwise::{ElementWiseFuser, ElemwiseOptimization},
-        matmul::{MatmulFuser, MatmulOptimization},
+        matmul::{MatmulFuser, MatmulOptimization, MatmulPrologueFuser},
         reduce::{ReduceFuser, ReduceOptimization},
         reduce_broadcasted::ReduceBroadcastedOptimization,
     },
@@ -145,6 +145,7 @@ impl<R: CubeRuntime> FusionRuntime for FusionCubeRuntime<R> {
         vec![
             Box::new(ElementWiseFuser::new(device.clone())),
             Box::new(MatmulFuser::new(device.clone())),
+            Box::new(MatmulPrologueFuser::new(device.clone())),
             Box::new(ReduceFuser::new(device.clone(), ReduceSettings::Always)),
             Box::new(ReduceBroadcastedFuser::new(device.clone())),
         ]
