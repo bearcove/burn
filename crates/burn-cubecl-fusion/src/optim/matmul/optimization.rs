@@ -43,6 +43,7 @@ use cubek::{
             },
             gemm::GemmRoutine,
             gemv_unit_perpendicular::GemvUnitPerpendicularRoutine,
+            naive::NaiveRoutine,
         },
         strategy::launch_kernel_virtual,
     },
@@ -233,6 +234,10 @@ pub enum FusedMatmulSelector {
     GemvUnitPerpendicular,
     SimpleUnit,
     DoubleUnit,
+    /// Single-pass warp-per-row gemv for the quantized W4A16 decode MatVec
+    /// (n=1). Currently dispatches to [`NaiveRoutine`] as a plumbing
+    /// placeholder; replaced by the dedicated QaGemv routine.
+    QaGemv,
 }
 
 impl FusedMatmulSelector {
@@ -262,6 +267,7 @@ impl FusedMatmulSelector {
             FusedMatmulSelector::GemvUnitPerpendicular => "gemv_unit_perpendicular".into(),
             FusedMatmulSelector::SimpleUnit => "simple_unit".into(),
             FusedMatmulSelector::DoubleUnit => "double_buffering_unit".into(),
+            FusedMatmulSelector::QaGemv => "qa_gemv".into(),
         };
 
         format!("fused_{name}")
@@ -666,6 +672,27 @@ impl FusedMatmulLaunch<'_> {
 
             FusedMatmulSelector::GemvUnitPerpendicular => {
                 match launch_inner_fix_dtype::<R, GemvUnitPerpendicularRoutine>(
+                    client,
+                    FusedMatmulInputLaunch::new(
+                        inputs,
+                        config.clone(),
+                        self.matmul.lhs.clone(),
+                        self.matmul.rhs.clone(),
+                        None,
+                        self.matmul.out.clone(),
+                    ),
+                    outputs,
+                    problem,
+                    vector_sizes,
+                    &Default::default(),
+                ) {
+                    Ok(_) => Ok(()),
+                    Err(err) => Err(FusedMatmulError::LaunchError(err)),
+                }
+            }
+
+            FusedMatmulSelector::QaGemv => {
+                match launch_inner_fix_dtype::<R, NaiveRoutine>(
                     client,
                     FusedMatmulInputLaunch::new(
                         inputs,

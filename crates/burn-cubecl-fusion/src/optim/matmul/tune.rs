@@ -154,6 +154,23 @@ pub fn fused_matmul_autotune<R: Runtime>(
             );
         }
 
+        // Quant decode gemv (warp-per-row, single pass). Only valid for the
+        // MatVec orientation (n=1, weight is the LHS matrix) — the other gemv-group
+        // kernels are VecMat-oriented and get rejected there, so QaGemv is the one
+        // that actually qualifies.
+        set = set.with(
+            Tunable::new(&FusedMatmulSelector::QaGemv.name(), move |input| {
+                tune_fused::<R>(input, FusedMatmulSelector::QaGemv)
+            })
+            .group(&gemv, move |key| {
+                if matches!(key.matmul_key.analysis.kind, MatmulKind::MatVec) {
+                    PRIORITY_MAX
+                } else {
+                    PRIORITY_NEVER
+                }
+            }),
+        );
+
         // Unit matmuls
         for (selector, double_buf) in [
             (FusedMatmulSelector::SimpleUnit, false),
