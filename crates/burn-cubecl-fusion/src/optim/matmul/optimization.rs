@@ -43,7 +43,7 @@ use cubek::{
             },
             gemm::GemmRoutine,
             gemv_unit_perpendicular::GemvUnitPerpendicularRoutine,
-            naive::NaiveRoutine,
+            qa_gemv::QaGemvRoutine,
         },
         strategy::launch_kernel_virtual,
     },
@@ -235,8 +235,8 @@ pub enum FusedMatmulSelector {
     SimpleUnit,
     DoubleUnit,
     /// Single-pass warp-per-row gemv for the quantized W4A16 decode MatVec
-    /// (n=1). Currently dispatches to [`NaiveRoutine`] as a plumbing
-    /// placeholder; replaced by the dedicated QaGemv routine.
+    /// (n=1): one plane per output row, lanes reduce K via plane_sum. A fusible
+    /// candidate the autotuner selects — burn-fusion attaches the epilogue.
     QaGemv,
 }
 
@@ -692,7 +692,7 @@ impl FusedMatmulLaunch<'_> {
             }
 
             FusedMatmulSelector::QaGemv => {
-                match launch_inner_fix_dtype::<R, NaiveRoutine>(
+                match launch_inner_fix_dtype::<R, QaGemvRoutine>(
                     client,
                     FusedMatmulInputLaunch::new(
                         inputs,
