@@ -62,13 +62,16 @@ impl<R: Runtime> MatmulPrologueFuser<R> {
         let client = R::client(&device);
         let props = client.properties();
         let max_bindings = props.hardware.max_bindings;
-        // Read (prologue) block: accumulate the leading elementwise ops.
+        // Read (prologue) block: accumulate the leading elementwise ops. Scalar
+        // (Deactivated) so the fused rhs read matches `vector_sizes.rhs = 1` in
+        // matmul_fused — otherwise the matmul casts a width-N read to width-1 and
+        // fails kernel expansion ("Cast element count must match").
         let settings_read = FuseSettings {
             inplace: true,
             ref_layout: RefLayoutSetting::OnlyContiguous,
             broadcast: false,
             output_shape_updates: true,
-            vectorization: VectorizationSetting::Activated,
+            vectorization: VectorizationSetting::Deactivated,
         };
         // Write (epilogue) block: same shape as today's matmul fusion.
         let settings_write = FuseSettings {
@@ -276,7 +279,10 @@ impl<R: Runtime> OperationFuser<CubeOptimization<R>> for MatmulPrologueFuser<R> 
     }
 
     fn properties(&self) -> burn_fusion::FuserProperties {
-        let p = self.fuser.properties();
+        let mut p = self.fuser.properties();
+        // Only ready once a matmul has anchored — a prologue-only window is not a
+        // valid matmul optimization (finish() would unwrap a None matmul).
+        p.ready = p.ready && self.matmul.is_some();
         if std::env::var("QA_FUSE_LOG").is_ok() {
             eprintln!(
                 "[PrologueFuser] properties: anchored={} ready={} score={} status={:?}",
