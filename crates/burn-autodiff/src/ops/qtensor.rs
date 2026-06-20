@@ -77,23 +77,23 @@ impl<B: Backend, C: CheckpointStrategy> QTensorOps<Self> for Autodiff<B, C> {
             ) {
                 let (weight, act_dtype) = ops.state;
                 unary::<B, _>(ops.parents, ops.node, grads, |grad| {
-                    // q_linear's forward applies bee's per-32-block forward-RHT (prerot)
-                    // to the activation — `R = (1/√32)·H·D_s` (sign, then Walsh-Hadamard)
-                    // — then matmuls the RHT-space weight: y = R(x) @ dequant(W_rot)ᵀ.
-                    // So grad_x = Rᵀ(grad_y @ dequant(W_rot)), with the adjoint
-                    // `Rᵀ = (1/√32)·D_s·H` (Hadamard, then sign). `dequantize` returns the
-                    // RHT-space (rotated) weight; the inverse-RHT lives here.
+                    // The plain `q_linear` forward does NOT apply the forward-RHT (prerot): the
+                    // caller pre-rotates the activation with a SEPARATE `rht_forward` (reshape +
+                    // mul + matmul, fully differentiable), whose own autodiff supplies the adjoint
+                    // Rᵀ. The forward here is just `y = x_rot @ dequant(W_rot)ᵀ`, so the backward
+                    // w.r.t. the (already pre-rotated) activation is simply `grad_y @ dequant(W_rot)`.
                     //
-                    // Dequant the weight + run the matmul in the ACTIVATION's precision (the
-                    // big win when that's f16/bf16: tensor cores + the dense weight is half the
-                    // bytes — q_linear's output is always f32, so grad arrives f32 and is cast
-                    // down). The RHT adjoint stays in f32 (f16 Hadamard rounding is lossy).
+                    // BUG FIX: this previously also applied `inverse_rht` here, which DOUBLE-rotated
+                    // the gradient (Rᵀ here + Rᵀ again from the caller's `rht_forward`), producing a
+                    // gradient ~orthogonal to the truth (cosine ≈ 0) — silently corrupting every
+                    // QLoRA training run. Caught by a finite-difference oracle (DISTILL_KV_GRADCHECK).
+                    //
+                    // Dequant + matmul in the ACTIVATION's precision (f16/bf16 → tensor cores, half-
+                    // byte weight; q_linear's output is f32 so grad arrives f32, cast to fdt).
                     let fdt: FloatDType = act_dtype.into();
                     let w = B::dequantize(weight, fdt);
                     let g = B::float_cast(grad, fdt);
-                    let tmp = B::float_matmul(g, w); // [m, in] in RHT (rotated) space
-                    let tmp_f32 = B::float_cast(tmp, FloatDType::F32);
-                    B::float_cast(inverse_rht::<B>(tmp_f32), fdt)
+                    B::float_matmul(g, w) // [m, in] = grad w.r.t. the pre-rotated activation
                 });
             }
         }
