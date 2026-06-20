@@ -45,6 +45,30 @@ where
             m,
             k,
         );
+    } else if matches!(
+        scheme.store,
+        burn_backend::quantization::QuantStore::PackedU32Dense(_)
+    ) {
+        // Symmetric (Q4S/…) dense: cubek's symmetric activation-quant (forward-RHT
+        // + per-half-block maxabs scale + round-to-signed + dense pack). The
+        // generic launch_ref panics on dense; this is the symmetric analogue of
+        // the codebook branch above, so `quantize_dynamic(Q4S)` stays high-level.
+        let tensor = into_contiguous(tensor);
+        let shape = tensor.shape();
+        let nd = shape.num_dims();
+        let k = shape[nd - 1];
+        let m = shape.num_elements() / k;
+        let rht_signs = super::tables::rht_signs();
+        cubek::quantization::qa_matmul::launch_symmetric_activation_quant::<R>(
+            &output.client,
+            scheme.value,
+            tensor.handle.clone(),
+            out_values.handle.clone(),
+            out_params.handle.clone(),
+            rht_signs,
+            m,
+            k,
+        );
     } else {
         cubek::quantization::quantize::launch_ref(
             &output.client,

@@ -9175,7 +9175,6 @@ dependencies = [
 [[package]]
 name = "tracel-llvm"
 version = "22.1.4-4"
-source = "git+https://github.com/tracel-ai/tracel-llvm?rev=82401e3c00a35a3fb7d5e2b415e79692e09e1079#82401e3c00a35a3fb7d5e2b415e79692e09e1079"
 dependencies = [
  "tracel-mlir-rs",
  "tracel-mlir-sys",
@@ -9184,7 +9183,6 @@ dependencies = [
 [[package]]
 name = "tracel-llvm-bundler"
 version = "22.1.4-4"
-source = "git+https://github.com/tracel-ai/tracel-llvm?rev=82401e3c00a35a3fb7d5e2b415e79692e09e1079#82401e3c00a35a3fb7d5e2b415e79692e09e1079"
 dependencies = [
  "anyhow",
  "bytes",
@@ -9203,7 +9201,6 @@ dependencies = [
 [[package]]
 name = "tracel-mlir-rs"
 version = "22.1.4-4"
-source = "git+https://github.com/tracel-ai/tracel-llvm?rev=82401e3c00a35a3fb7d5e2b415e79692e09e1079#82401e3c00a35a3fb7d5e2b415e79692e09e1079"
 dependencies = [
  "tracel-mlir-rs-macros",
  "tracel-mlir-sys",
@@ -9212,7 +9209,6 @@ dependencies = [
 [[package]]
 name = "tracel-mlir-rs-macros"
 version = "22.1.4-4"
-source = "git+https://github.com/tracel-ai/tracel-llvm?rev=82401e3c00a35a3fb7d5e2b415e79692e09e1079#82401e3c00a35a3fb7d5e2b415e79692e09e1079"
 dependencies = [
  "comrak",
  "convert_case 0.8.0",
@@ -9228,7 +9224,6 @@ dependencies = [
 [[package]]
 name = "tracel-mlir-sys"
 version = "22.1.4-4"
-source = "git+https://github.com/tracel-ai/tracel-llvm?rev=82401e3c00a35a3fb7d5e2b415e79692e09e1079#82401e3c00a35a3fb7d5e2b415e79692e09e1079"
 dependencies = [
  "tracel-llvm-bundler",
 ]
@@ -9247,7 +9242,6 @@ dependencies = [
 [[package]]
 name = "tracel-tblgen-rs"
 version = "22.1.4-4"
-source = "git+https://github.com/tracel-ai/tracel-llvm?rev=82401e3c00a35a3fb7d5e2b415e79692e09e1079#82401e3c00a35a3fb7d5e2b415e79692e09e1079"
 dependencies = [
  "paste",
  "thiserror 2.0.18",
