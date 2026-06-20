@@ -142,17 +142,23 @@ impl<R: CubeRuntime> FusionRuntime for FusionCubeRuntime<R> {
     type FusionDevice = R::CubeDevice;
 
     fn fusers(device: R::Device) -> Vec<Box<dyn burn_fusion::OperationFuser<Self::Optimization>>> {
-        vec![
+        let mut fusers: Vec<Box<dyn burn_fusion::OperationFuser<Self::Optimization>>> = vec![
             Box::new(ElementWiseFuser::new(device.clone())),
             Box::new(MatmulFuser::new(device.clone())),
-            // WIP: prologue fusion. Currently the 2-block trace mis-registers the
-            // prologue op's output as a materialized input (panics the launch on a
-            // prologue+matmul, incl. the real decode). To disable while debugging,
-            // comment out this line. See notes/matmul-prologue-fusion-design.md.
-            Box::new(MatmulPrologueFuser::new(device.clone())),
-            Box::new(ReduceFuser::new(device.clone(), ReduceSettings::Always)),
-            Box::new(ReduceBroadcastedFuser::new(device.clone())),
-        ]
+        ];
+        // WIP: prologue fusion. Currently the 2-block trace mis-registers the prologue
+        // op's output as a materialized input — for some shapes its candidate panics
+        // (`args.rs` "Input must be concrete"), and cubecl autotune can't survive a
+        // candidate that errors, so the whole matmul dies (seen on the QLoRA train step
+        // at batch>=16). Runtime opt-out: BURN_DISABLE_PROLOGUE_FUSION=1 drops the
+        // candidate, so the matmul falls to the epilogue/elementwise path. (Was: "comment
+        // out this line".) See notes/matmul-prologue-fusion-design.md.
+        if std::env::var("BURN_DISABLE_PROLOGUE_FUSION").is_err() {
+            fusers.push(Box::new(MatmulPrologueFuser::new(device.clone())));
+        }
+        fusers.push(Box::new(ReduceFuser::new(device.clone(), ReduceSettings::Always)));
+        fusers.push(Box::new(ReduceBroadcastedFuser::new(device.clone())));
+        fusers
     }
 }
 
