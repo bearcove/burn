@@ -9,8 +9,8 @@
 //! `mask [n_q, n_k]` (`-inf` where masked), `out [n_q, n_heads, head_dim]`. GQA: query
 //! head `h` reads kv head `h / groups` (heads grouped consecutively per kv head).
 
-use crate::{CubeRuntime, tensor::CubeTensor};
 use crate::ops::numeric::empty_device_dtype;
+use crate::{CubeRuntime, tensor::CubeTensor};
 use burn_backend::{DType, Shape, TensorMetadata};
 use cubecl::{CubeCount, CubeDim, prelude::*};
 

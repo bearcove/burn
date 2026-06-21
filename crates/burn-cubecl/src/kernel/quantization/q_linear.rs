@@ -13,7 +13,13 @@ use burn_backend::{DType, Shape, TensorMetadata};
 /// rotated-and-packed, and the kernel dequantizes each weight column once.
 pub fn q_linear<R: CubeRuntime>(activation: CubeTensor<R>, weight: CubeTensor<R>) -> CubeTensor<R> {
     // PLAIN matvec: caller supplies the activation already prerot'd (helix `rht_forward`).
-    q_linear_inner(activation, weight, cubek::quantization::qa_matmul::RhtSigns(&[]), None, 0.0)
+    q_linear_inner(
+        activation,
+        weight,
+        cubek::quantization::qa_matmul::RhtSigns(&[]),
+        None,
+        0.0,
+    )
 }
 
 /// Like [`q_linear`] but the **forward-RHT (prerot) is applied IN-KERNEL** (bee's
@@ -39,7 +45,13 @@ pub fn q_linear_prerot_norm<R: CubeRuntime>(
     gamma: CubeTensor<R>,
     eps: f32,
 ) -> CubeTensor<R> {
-    q_linear_inner(activation, weight, super::tables::rht_signs(), Some(gamma), eps)
+    q_linear_inner(
+        activation,
+        weight,
+        super::tables::rht_signs(),
+        Some(gamma),
+        eps,
+    )
 }
 
 fn q_linear_inner<R: CubeRuntime>(

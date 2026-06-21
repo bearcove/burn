@@ -742,7 +742,10 @@ impl NdArrayQTensor {
                 block_size,
             ),
             // Codebook / other GPU-only modes aren't supported on ndarray.
-            _ => unimplemented!("ndarray strategy: unsupported quant scheme {:?}", self.scheme),
+            _ => unimplemented!(
+                "ndarray strategy: unsupported quant scheme {:?}",
+                self.scheme
+            ),
         }
     }
 }

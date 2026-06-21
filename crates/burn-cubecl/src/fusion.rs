@@ -156,7 +156,10 @@ impl<R: CubeRuntime> FusionRuntime for FusionCubeRuntime<R> {
         if std::env::var("BURN_DISABLE_PROLOGUE_FUSION").is_err() {
             fusers.push(Box::new(MatmulPrologueFuser::new(device.clone())));
         }
-        fusers.push(Box::new(ReduceFuser::new(device.clone(), ReduceSettings::Always)));
+        fusers.push(Box::new(ReduceFuser::new(
+            device.clone(),
+            ReduceSettings::Always,
+        )));
         fusers.push(Box::new(ReduceBroadcastedFuser::new(device.clone())));
         fusers
     }

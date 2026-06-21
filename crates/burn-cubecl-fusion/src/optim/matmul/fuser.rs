@@ -70,8 +70,16 @@ impl<R: Runtime> OperationFuser<CubeOptimization<R>> for MatmulFuser<R> {
         let log = std::env::var("QA_FUSE_LOG").is_ok();
 
         if self.matmul.is_none() {
-            if log && !matches!(operation, OperationIr::Float(_, FloatOperationIr::Matmul(_))) {
-                eprintln!("[MatmulFuser] close: first op not matmul → {}", op_name(operation));
+            if log
+                && !matches!(
+                    operation,
+                    OperationIr::Float(_, FloatOperationIr::Matmul(_))
+                )
+            {
+                eprintln!(
+                    "[MatmulFuser] close: first op not matmul → {}",
+                    op_name(operation)
+                );
             }
             if let OperationIr::Float(_, FloatOperationIr::Matmul(op)) = operation {
                 if log {
@@ -126,7 +134,11 @@ impl<R: Runtime> OperationFuser<CubeOptimization<R>> for MatmulFuser<R> {
             if log {
                 eprintln!(
                     "[MatmulFuser] epilogue {}: {}",
-                    if can_register { "+fuse" } else { "CLOSE (cant_fuse)" },
+                    if can_register {
+                        "+fuse"
+                    } else {
+                        "CLOSE (cant_fuse)"
+                    },
                     op_name(operation)
                 );
             }

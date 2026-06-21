@@ -40,10 +40,7 @@ impl<B: Backend, C: CheckpointStrategy> QTensorOps<Self> for Autodiff<B, C> {
         )
     }
 
-    fn quantize_dynamic(
-        tensor: FloatTensor<Self>,
-        scheme: &QuantScheme,
-    ) -> QuantizedTensor<Self> {
+    fn quantize_dynamic(tensor: FloatTensor<Self>, scheme: &QuantScheme) -> QuantizedTensor<Self> {
         B::quantize_dynamic(tensor.primitive, scheme)
     }
 
@@ -155,4 +152,3 @@ impl<B: Backend, C: CheckpointStrategy> QTensorOps<Self> for Autodiff<B, C> {
         B::q_argmin(tensor, dim, out_dtype)
     }
 }
-

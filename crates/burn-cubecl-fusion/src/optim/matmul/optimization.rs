@@ -515,9 +515,7 @@ impl FusedMatmulLaunch<'_> {
                 vector_sizes.lhs, vector_sizes.rhs, vector_sizes.out,
             );
         }
-        if vector_sizes.out == 1
-            && (vector_sizes.lhs > 1 || vector_sizes.rhs > 1)
-            && !lhs_is_quant
+        if vector_sizes.out == 1 && (vector_sizes.lhs > 1 || vector_sizes.rhs > 1) && !lhs_is_quant
         {
             return Err(FusedMatmulError::InvalidInput(
                 "Output vector size of 1 removes the gain from fusion",

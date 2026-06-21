@@ -78,7 +78,11 @@ impl<B: FusionBackend> QTensorOps<Self> for Fusion<B> {
         let desc = InitOperationIr::create(shape, dtype, || client.register_tensor_handle(handle));
 
         client
-            .register(StreamId::current(), OperationIr::Init(desc), NoOp::<B>::new())
+            .register(
+                StreamId::current(),
+                OperationIr::Init(desc),
+                NoOp::<B>::new(),
+            )
             .output()
     }
 
@@ -534,8 +538,10 @@ impl<B: FusionBackend> QTensorOps<Self> for Fusion<B> {
         if std::env::var("QA_FUSE_LOG").is_ok() {
             eprintln!(
                 "[q_matmul REG] lhs={:?}({}) rhs={:?}({}) out={:?} dtype={dtype:?}",
-                desc.lhs.shape, if lhs_quantized { "Q" } else { "F" },
-                desc.rhs.shape, if rhs_quantized { "Q" } else { "F" },
+                desc.lhs.shape,
+                if lhs_quantized { "Q" } else { "F" },
+                desc.rhs.shape,
+                if rhs_quantized { "Q" } else { "F" },
                 desc.out.shape,
             );
         }

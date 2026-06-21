@@ -1,4 +1,5 @@
 use super::optimization::{FusedMatmul, MatmulOptimization};
+use crate::engine::trace::RegisterTensor;
 use crate::{
     engine::{
         fuser::TraceOperationFuser,
@@ -7,7 +8,6 @@ use crate::{
     optim::CubeOptimization,
     optim::matmul::args::MatmulArg,
 };
-use crate::engine::trace::RegisterTensor;
 use burn_fusion::{FuserStatus, OperationFuser};
 use burn_ir::{FloatOperationIr, MatmulOpIr, OperationIr, TensorId};
 use burn_std::DType;
@@ -103,7 +103,11 @@ impl<R: Runtime> MatmulPrologueFuser<R> {
         if log {
             eprintln!(
                 "[PrologueFuser] on_matmul: QUANT={is_quant} accumulated_out_shape={:?} rhs_shape={:?} lhs_shape={:?} lhs_dtype={:?} num_ops={}",
-                self.fuser.current_output_shape, op.rhs.shape, op.lhs.shape, op.lhs.dtype, self.fuser.num_ops,
+                self.fuser.current_output_shape,
+                op.rhs.shape,
+                op.lhs.shape,
+                op.lhs.dtype,
+                self.fuser.num_ops,
             );
         }
         // The prologue must produce exactly the rhs (the activation). If nothing
@@ -111,7 +115,9 @@ impl<R: Runtime> MatmulPrologueFuser<R> {
         // let the epilogue fuser / elementwise path take it.
         if self.fuser.current_output_shape != op.rhs.shape {
             if log {
-                eprintln!("[PrologueFuser] close: accumulated shape != rhs (no prologue produces rhs)");
+                eprintln!(
+                    "[PrologueFuser] close: accumulated shape != rhs (no prologue produces rhs)"
+                );
             }
             self.fuser.close();
             self.fuser_read_fallback.close();
@@ -240,8 +246,18 @@ impl<R: Runtime> OperationFuser<CubeOptimization<R>> for MatmulPrologueFuser<R> 
             eprintln!(
                 "[PrologueFuser] trace blocks={} inputs={:?} outputs={:?}",
                 trace.blocks.len(),
-                trace.resources.inputs.iter().map(reg_id).collect::<Vec<_>>(),
-                trace.resources.outputs.iter().map(reg_id).collect::<Vec<_>>(),
+                trace
+                    .resources
+                    .inputs
+                    .iter()
+                    .map(reg_id)
+                    .collect::<Vec<_>>(),
+                trace
+                    .resources
+                    .outputs
+                    .iter()
+                    .map(reg_id)
+                    .collect::<Vec<_>>(),
             );
             for (i, b) in trace.blocks.iter().enumerate() {
                 eprintln!(

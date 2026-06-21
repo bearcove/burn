@@ -77,7 +77,10 @@ impl Scoring {
             eprintln!(
                 "[Scoring] blocks={} block_io(reads,writes)={block_io:?} \
                  unfused(r={} w={} ops={}) fused(r={num_reads_fused} w={num_writes_fused}) penalty={num_penalty} → score={score}",
-                trace.blocks.len(), self.num_reads, self.num_writes, self.num_ops,
+                trace.blocks.len(),
+                self.num_reads,
+                self.num_writes,
+                self.num_ops,
             );
         }
         score
